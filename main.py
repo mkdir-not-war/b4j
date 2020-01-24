@@ -1,5 +1,34 @@
 import pygame
 
+# treat like a struct
+class Polygon:
+	def __init__(self, vlist=[]):
+		self.vertices = vlist[:]
+
+def poly_contains(polygon, x, y):
+	numverts = len(polygon.vertices)
+	intersections = 0
+	for i in range(numverts):
+		x1 = polygon.vertices[i][0]
+		y1 = polygon.vertices[i][1]
+		x2 = polygon.vertices[(i+1)%numverts][0];
+		y2 = polygon.vertices[(i+1)%numverts][1];
+
+		if (((y1 <= y and y < y2) or
+			(y2 <= y and y < y1)) and
+			x < ((x2 - x1) / (y2 - y1) * (y - y1) + x1)):
+			intersections += 1
+		return (intersections & 1) == 1 
+
+def poly_collides(poly1, poly2):
+	for (x, y) in poly1.vertices:
+		if (poly_contains(poly2, x, y)):
+			return True
+	for (x, y) in poly2.vertices:
+		if (poly_contains(poly1, x, y)):
+			return True
+	return False
+
 def main():
 	pygame.init()
 
@@ -57,8 +86,10 @@ def main():
 			playerpos[0] += speed
 
 		# handle input
+		'''
 		joystick = pygame.joystick.Joystick(0)
 		joystick.init() # need this for the events to register at all
+		'''
 
 		# draw
 		screen.fill(grey)
