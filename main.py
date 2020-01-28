@@ -1,21 +1,35 @@
 import pygame
+from math import sqrt
 
 def dot(v1, v2):
 	return v1[0]*v2[0] + v1[1]*v2[1]
 
-# treat like a struct
-class Polygon:
-	def __init__(self, vlist=[]):
-		self.vertices = vlist[:]
+def length(v):
+	return sqrt(v[0]**2 + v[1]**2)
 
+# assumes u = (1, 0)
+def get_rotated_vecs(v, vecs):
+	u = (1, 0)
+	cos = v[0]/length(v)
+	sin = sqrt(1.0 - cos**2)
+	if (v[1] < 0):
+		sin *= -1
+	result = []
+	for vec in vecs:
+		x2 = vec[0]*cos - vec[1]*sin
+		y2 = vec[0]*sin + vec[1]*cos
+		result.append((x2, y2))
+	return result
+
+# treat like a struct
 def poly_contains(polygon, x, y):
-	numverts = len(polygon.vertices)
+	numverts = len(polygon)
 	intersections = 0
 	for i in range(numverts):
-		x1 = polygon.vertices[i][0]
-		y1 = polygon.vertices[i][1]
-		x2 = polygon.vertices[(i+1)%numverts][0];
-		y2 = polygon.vertices[(i+1)%numverts][1];
+		x1 = polygon[i][0]
+		y1 = polygon[i][1]
+		x2 = polygon[(i+1)%numverts][0];
+		y2 = polygon[(i+1)%numverts][1];
 
 		if (((y1 <= y and y < y2) or
 			(y2 <= y and y < y1)) and
@@ -24,10 +38,10 @@ def poly_contains(polygon, x, y):
 	return (intersections & 1) == 1 
 
 def poly_collides(poly1, poly2):
-	for (x, y) in poly1.vertices:
+	for (x, y) in poly1:
 		if (poly_contains(poly2, x, y)):
 			return True
-	for (x, y) in poly2.vertices:
+	for (x, y) in poly2:
 		if (poly_contains(poly1, x, y)):
 			return True
 	return False
@@ -37,19 +51,54 @@ def get_screen_coord(playerpos, playeroff, worldx, worldy):
 	diffy = worldy-playerpos[1]
 	return(playeroff[0]+diffx, playeroff[1]+diffy)
 
+class Entity:
+	def __init__(self, pos):
+		self.p = pos[:]
+		self.hitbox = None
+
+class Hurtbox:
+	def __init__(self, box, frames):
+		self.box = box[:]
+		self.framesleft = frames
+
+def get_entity_hitbox(entity):
+	return [(x+entity.p[0], y+entity.p[1]) for (x, y) in entity.hitbox]
+
 class Player:
 	def __init__(self):
+		self.animstate = 'idle'
+		self.dir = [0, 0]
 		self.p = [0, 0]
 		self.dp = [0, 0]
 		self.ddp = [0, 0]
 		self.size = 1
-		self.movebox = [] 
+		self.movebox = []
+		self.currinputcooldown = 0
+		self.jabhurtbox = []
+		self.jabhurtframes = 1
+
+def player_inputcooldown_update(player):
+	if (player.currinputcooldown > 0):
+		player.currinputcooldown -= 1
+	if (player.currinputcooldown <= 0):
+		player.animstate = 'idle'
+
+def player_jab(player, hurtboxes):
+	jab_cooldown = 6
+	if (player.currinputcooldown <= 0):
+		player.currinputcooldown = jab_cooldown
+		# Identity, Scale, Rotate, Translate
+		jabhurtbox = [(x*player.size, y*player.size) for (x, y) in player.jabhurtbox]
+		jabhurtbox = get_rotated_vecs(player.dir, jabhurtbox)
+		jabhurtbox = [(x+player.p[0], y+player.p[1]) for (x, y) in jabhurtbox]
+		hurtboxes.append(Hurtbox(jabhurtbox, player.jabhurtframes))
 
 def main():
 	pygame.init()
 
 	grey = pygame.Color(200, 200, 200)
 	lightgrey = pygame.Color(125, 125, 125)
+	darkred = pygame.Color(250, 100, 100)
 	red = pygame.Color('red')
 	black = pygame.Color('black')
 
@@ -66,6 +115,8 @@ def main():
 	pygame.joystick.init()
 
 	geometry = []
+	entities = []
+	hurtboxes = []
 
 	# populate walls
 	wallwidth = 50
@@ -73,28 +124,39 @@ def main():
 	for i in range(20):
 		for j in range(20):
 			if j == 0 or i == 0 or j == 19 or i == 19 or (i%j==4 and j != 15):
-				geometry.append(Polygon(
+				geometry.append(
 					[(i*wallwidth, j*wallwidth), 
 					((i+1)*wallwidth, j*wallwidth), 
 					((i+1)*wallwidth, (j+1)*wallwidth), 
 					(i*wallwidth, (j+1)*wallwidth)]
-					))
+					)
+
+	# throw in a couple baddies
+	baddy1 = Entity([150, 150])
+	baddy1.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
+	entities.append(baddy1)
 
 	# player stuff
 	playeroffset = midscreen
 	player = Player()
 	player.p = [100, 100]
-	player.size = 40
-	speed = 3.6
+	player.size = 40 # aka diameter
+	speed = 3.7
+	player.dir = (0, 1)
 	# offset from player pos, as a factor of size
 	player.movebox = [(.45, 0), (0, -0.45), (-0.45, 0), (0, 0.45)] 
+	# facing (1, 0), scale to size
+	player.jabhurtbox = [(0.55, 0.30), (1.20, 0.30), (1.20, -0.30), (0.55, -0.30)]
+	player.jabhurtframes = 3
 
+	prev_input = []
 	curr_input = [] # int list
 
 	while not done:
 		clock.tick(FPS)
 
 		# poll input
+		prev_input = curr_input[:]
 		for event in pygame.event.get(): # User did something.
 			if event.type == pygame.QUIT: # If user clicked close.
 				done = True # Flag that we are done so we exit this loop.
@@ -107,21 +169,32 @@ def main():
 				if event.key in curr_input:
 					curr_input.remove(event.key)
 
+		# update input cooldown before processing new input
+		player_inputcooldown_update(player)
+
 		# keypad handle input
 		moveinput_dir = [0, 0]
 		blocking = False
 		if pygame.K_ESCAPE in curr_input:
 			done = True
-		if pygame.K_SPACE in curr_input:
-			blocking = True
-		if pygame.K_UP in curr_input:
-			moveinput_dir[1] += -1
-		if pygame.K_DOWN in curr_input:
-			moveinput_dir[1] += 1
-		if pygame.K_LEFT in curr_input:
-			moveinput_dir[0] += -1
-		if pygame.K_RIGHT in curr_input:
-			moveinput_dir[0] += 1
+		if player.currinputcooldown <= 0:
+			if pygame.K_SPACE in curr_input:
+				blocking = True
+
+			if pygame.K_UP in curr_input:
+				moveinput_dir[1] += -1
+			if pygame.K_DOWN in curr_input:
+				moveinput_dir[1] += 1
+			if pygame.K_LEFT in curr_input:
+				moveinput_dir[0] += -1
+			if pygame.K_RIGHT in curr_input:
+				moveinput_dir[0] += 1
+			# face direction of movement whether colliding or not
+			if (moveinput_dir[0] != 0 or moveinput_dir[1] != 0):
+				player.dir = moveinput_dir[:]
+
+			if pygame.K_KP0 in curr_input and not pygame.K_KP0 in prev_input:
+				player_jab(player, hurtboxes)
 
 		# movement calculation -> collision check -> update position
 		if (not blocking):
@@ -129,19 +202,34 @@ def main():
 			new_dp = [moveinput_dir[0]*speed, moveinput_dir[1]*speed]
 			new_p = [new_dp[0] + player.p[0], new_dp[1] + player.p[1]]
 
-			# check collision with new_p on geometry
+			# check collision with new_p on geometry, entities and hurtboxes
 			colliding = False
 			collisionboxes = []
-			new_p_box = Polygon()
+			collisionentities = []
+			collisionhbs = []
+
+			new_p_box = []
 			for (sx, sy) in player.movebox:
 				vx = sx*player.size + new_p[0]
 				vy = sy*player.size + new_p[1]
-				new_p_box.vertices.append((vx, vy))
+				new_p_box.append((vx, vy))
 
 			for p in geometry:
 				if (poly_collides(p, new_p_box)):
 					colliding = True
 					collisionboxes.append(p)
+
+			for e in entities:
+				ehb = get_entity_hitbox(e)
+				if (poly_collides(ehb, new_p_box)):
+					colliding = True
+					collisionboxes.append(ehb)
+					collisionentities.append(e)
+
+			for h in hurtboxes:
+				hb = h.box
+				if (poly_collides(hb, new_p_box)):
+					collisionhbs.append(h)
 
 			# move if not colliding
 			if (colliding):
@@ -161,11 +249,11 @@ def main():
 							move[0]*speed + player.p[0], 
 							move[1]*speed + player.p[1]]
 
-						test_p_box = Polygon()
+						test_p_box = []
 						for (sx, sy) in player.movebox:
 							vx = sx*player.size + test_p[0]
 							vy = sy*player.size + test_p[1]
-							test_p_box.vertices.append((vx, vy))
+							test_p_box.append((vx, vy))
 
 						stillcollide = False
 						for poly in collisionboxes:
@@ -179,6 +267,13 @@ def main():
 					player.p = bestp
 			else:
 				player.p = new_p
+
+		# calculate hurtboxes with enemies
+
+		# clean hurtboxes
+		for h in hurtboxes:
+			h.framesleft -= 1
+		hurtboxes = [h for h in hurtboxes if h.framesleft > 0]
 
 		'''
 		joystick = pygame.joystick.Joystick(0)
@@ -205,13 +300,20 @@ def main():
 		# draw entities
 		for e in geometry:
 			everts = [get_screen_coord(player.p, playeroffset, x, y) \
-				for (x, y) in e.vertices]
+				for (x, y) in e]
 			pygame.draw.polygon(screen, lightgrey, everts)
+
+		for e in entities:
+			everts = [get_screen_coord(player.p, playeroffset, x+e.p[0], y+e.p[1]) \
+				for (x, y) in e.hitbox]
+			pygame.draw.polygon(screen, darkred, everts)
 
 		pygame.draw.circle(screen, red, midscreen, player.size//2)
 		#pygame.draw.polygon(screen, red, )
 
-		
+		for h in hurtboxes:
+			hverts = [get_screen_coord(player.p, playeroffset, x, y) for (x, y) in h.box]
+			pygame.draw.polygon(screen, black, hverts, 1)
 
 
 		pygame.display.flip()
