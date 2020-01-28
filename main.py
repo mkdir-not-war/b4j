@@ -57,9 +57,10 @@ class Entity:
 		self.hitbox = None
 
 class Hurtbox:
-	def __init__(self, box, frames):
+	def __init__(self, box, frames, dir):
 		self.box = box[:]
 		self.framesleft = frames
+		self.direction = dir
 
 def get_entity_hitbox(entity):
 	return [(x+entity.p[0], y+entity.p[1]) for (x, y) in entity.hitbox]
@@ -91,7 +92,7 @@ def player_jab(player, hurtboxes):
 		jabhurtbox = [(x*player.size, y*player.size) for (x, y) in player.jabhurtbox]
 		jabhurtbox = get_rotated_vecs(player.dir, jabhurtbox)
 		jabhurtbox = [(x+player.p[0], y+player.p[1]) for (x, y) in jabhurtbox]
-		hurtboxes.append(Hurtbox(jabhurtbox, player.jabhurtframes))
+		hurtboxes.append(Hurtbox(jabhurtbox, player.jabhurtframes, player.dir))
 
 def main():
 	pygame.init()
