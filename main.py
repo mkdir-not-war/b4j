@@ -56,50 +56,85 @@ class Entity:
 		self.p = pos[:]
 		self.hitbox = None
 
+def entity_get_hitbox(entity):
+	return [(x+entity.p[0], y+entity.p[1]) for (x, y) in entity.hitbox]
+
 class Hurtbox:
 	def __init__(self, box, frames, dir):
 		self.box = box[:]
 		self.framesleft = frames
 		self.direction = dir
 
-def get_entity_hitbox(entity):
-	return [(x+entity.p[0], y+entity.p[1]) for (x, y) in entity.hitbox]
+def hurtbox_get(box, direction, position, frames):
+	hb = get_rotated_vecs(direction, box)
+	hb = [(x+position[0], y+position[1]) for (x, y) in hb]
+	return Hurtbox(hb, frames, direction)
+
+class NoneAction:
+	def __init__(self):
+		self.actiontype = 'none'
+
+noneaction = NoneAction()
 
 class Player:
 	def __init__(self):
-		self.animstate = 'idle'
+		self.state = 'idle'
 		self.dir = [0, 0]
 		self.p = [0, 0]
 		self.dp = [0, 0]
 		self.ddp = [0, 0]
 		self.size = 1
 		self.movebox = []
-		self.currinputcooldown = 0
-		self.jabhurtbox = []
-		self.jabhurtframes = 1
 
-def player_inputcooldown_update(player):
-	if (player.currinputcooldown > 0):
-		player.currinputcooldown -= 1
-	if (player.currinputcooldown <= 0):
-		player.animstate = 'idle'
+		self.actionframe = 0
+		self.currentaction = noneaction
 
-def player_jab(player, hurtboxes):
-	jab_cooldown = 6
-	if (player.currinputcooldown <= 0):
-		player.currinputcooldown = jab_cooldown
-		# Identity, Scale, Rotate, Translate
-		jabhurtbox = [(x*player.size, y*player.size) for (x, y) in player.jabhurtbox]
-		jabhurtbox = get_rotated_vecs(player.dir, jabhurtbox)
-		jabhurtbox = [(x+player.p[0], y+player.p[1]) for (x, y) in jabhurtbox]
-		hurtboxes.append(Hurtbox(jabhurtbox, player.jabhurtframes, player.dir))
+		self.jab = None
+		self.uppercut = None
+
+def player_update(player, hurtboxes):
+	if (player.actionframe > 0):
+		player.actionframe -= 1
+	if (player.actionframe <= 0):
+		if player.currentaction.actiontype == 'attack':
+			if player.state == 'startup':
+				player.state = 'hurt'
+				player.actionframe = player.currentaction.hurtframes
+				hurtbox = [(x*player.size, y*player.size) \
+					for (x, y) in player.currentaction.box]
+				hurtboxes.append(hurtbox_get(
+					hurtbox, 
+					player.dir, 
+					player.p, 
+					player.currentaction.hurtframes))
+			elif player.state == 'hurt':
+				player.state = 'cooldown'
+				player.actionframe = player.currentaction.cooldown
+			elif player.state == 'cooldown':
+				player.state = 'idle'
+				player.currentaction = noneaction
+				
+
+def player_attack(player, attack):
+	player.state = 'startup'
+	player.currentaction = attack
+
+class Attack:
+	def __init__(self, startup, hurtframes, cooldown, box, nextatk=None):
+		self.actiontype = 'attack'
+		self.startup = startup # frames int
+		self.hurtframes = hurtframes # frames int
+		self.cooldown = cooldown # frames int
+		self.box = box # use hurtbox_get to create object
+		self.nextatk = nextatk # auto-start this next if not None
 
 def main():
 	pygame.init()
 
 	grey = pygame.Color(200, 200, 200)
 	lightgrey = pygame.Color(125, 125, 125)
-	darkred = pygame.Color(250, 100, 100)
+	darkred = pygame.Color(80, 0, 0)
+	lightred = pygame.Color(250, 100, 100)
 	red = pygame.Color('red')
 	black = pygame.Color('black')
 
@@ -146,9 +181,14 @@ def main():
 	player.dir = (0, 1)
 	# offset from player pos, as a factor of size
 	player.movebox = [(.45, 0), (0, -0.45), (-0.45, 0), (0, 0.45)] 
-	# facing (1, 0), scale to size
-	player.jabhurtbox = [(0.55, 0.30), (1.20, 0.30), (1.20, -0.30), (0.55, -0.30)]
-	player.jabhurtframes = 3
+
+	player.jab = Attack(
+		1, 3, 5, 
+		[(0.55, 0.30), (1.20, 0.30), (1.20, -0.30), (0.55, -0.30)])
+	player.uppercut = Attack(
+		24, 6, 24,
+		[(0.55, 0.30), (1.20, 0.30), (1.20, -0.30), (0.55, -0.30)])
+
 
 	prev_input = []
 	curr_input = [] # int list
@@ -170,15 +210,12 @@ def main():
 				if event.key in curr_input:
 					curr_input.remove(event.key)
 
-		# update input cooldown before processing new input
-		player_inputcooldown_update(player)
-
 		# keypad handle input
 		moveinput_dir = [0, 0]
 		blocking = False
 		if pygame.K_ESCAPE in curr_input:
 			done = True
-		if player.currinputcooldown <= 0:
+		if player.state == 'idle':
 			if pygame.K_SPACE in curr_input:
 				blocking = True
 
@@ -195,7 +232,17 @@ def main():
 				player.dir = moveinput_dir[:]
 
 			if pygame.K_KP0 in curr_input and not pygame.K_KP0 in prev_input:
-				player_jab(player, hurtboxes)
+				player_attack(player, player.jab)
+			elif pygame.K_KP1 in curr_input and not pygame.K_KP1 in prev_input:
+				player_attack(player, player.uppercut)
+
+		elif player.state == 'dashing':
+			pass # can skip the cooldown period
+
+		elif player.state == 'blocking':
+			if ((pygame.K_KP0 in curr_input and not pygame.K_KP0 in prev_input) or
+				(pygame.K_KP1 in curr_input and not pygame.K_KP1 in prev_input)):
+				pass # attempt to parry
 
 		# movement calculation -> collision check -> update position
 		if (not blocking):
@@ -221,7 +268,7 @@ def main():
 					collisionboxes.append(p)
 
 			for e in entities:
-				ehb = get_entity_hitbox(e)
+				ehb = entity_get_hitbox(e)
 				if (poly_collides(ehb, new_p_box)):
 					colliding = True
 					collisionboxes.append(ehb)
@@ -281,6 +328,9 @@ def main():
 		joystick.init() # need this for the events to register at all
 		'''
 
+		# update logic based on collision and input
+		player_update(player, hurtboxes)
+
 		# draw
 		screen.fill(grey)
 
@@ -307,9 +357,11 @@ def main():
 		for e in entities:
 			everts = [get_screen_coord(player.p, playeroffset, x+e.p[0], y+e.p[1]) \
 				for (x, y) in e.hitbox]
-			pygame.draw.polygon(screen, darkred, everts)
+			pygame.draw.polygon(screen, lightred, everts)
 
 		pygame.draw.circle(screen, red, midscreen, player.size//2)
+		if player.currentaction.actiontype == 'attack':
+			pygame.draw.circle(screen, darkred, midscreen, player.size//2, 2)
 		#pygame.draw.polygon(screen, red, )
 
 		for h in hurtboxes:
