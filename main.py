@@ -21,7 +21,6 @@ def get_rotated_vecs(v, vecs):
 		result.append((x2, y2))
 	return result
 
-# treat like a struct
 def poly_contains(polygon, x, y):
 	numverts = len(polygon)
 	intersections = 0
@@ -94,6 +93,17 @@ class NoneAction:
 
 noneaction = NoneAction()
 
+class Dash:
+	def __init__(self):
+		self.actiontype = 'dash'
+		self.speed = 12
+
+		self.activeframes = 10
+		self.chainframes = 5 # how many frames of beginning of cooldown a chain can start
+		self.cooldown = 12
+
+dashaction = Dash()
+
 class Player:
 	def __init__(self):
 		self.state = 'idle'
@@ -116,7 +126,18 @@ def player_update(player, hurtboxes):
 	if (player.actionframe > 0):
 		player.actionframe -= 1
 	if (player.actionframe <= 0):
-		if player.currentaction.actiontype == 'attack':
+		if player.currentaction.actiontype == 'dash':
+			if player.state == 'active':
+				player.state = 'chainable'
+				player.actionframe = dashaction.chainframes
+			elif player.state == 'chainable':
+				player.state = 'cooldown'
+				player.actionframe = dashaction.cooldown
+			elif player.state == 'cooldown':
+				player.state = 'idle'
+				player.currentaction = noneaction
+
+		elif player.currentaction.actiontype == 'attack':
 			continueprocessing = True
 			while (continueprocessing):
 				if player.state == 'startup':
@@ -149,6 +170,14 @@ def player_attack(player, attack):
 	player.state = 'startup'
 	player.currentaction = attack
 	player.actionframe = attack.startup
+
+def player_dash(player):
+	if (player.state == 'idle' or 
+		(player.currentaction.actiontype == 'dash' and player.state == 'chainable')):
+		player.state = 'active'
+		player.currentaction = dashaction
+		player.actionframe = dashaction.activeframes
+
 
 class Attack:
 	def __init__(self, startup, activeframes, cooldown, box, hurtframes=0, speed=0, nextatk=None):
@@ -253,12 +282,11 @@ def main():
 
 		# keypad handle input
 		moveinput_dir = [0, 0]
-		blocking = False
 		if pygame.K_ESCAPE in curr_input:
 			done = True
 		if player.state == 'idle':
 			if pygame.K_SPACE in curr_input:
-				blocking = True
+				pass
 
 			if pygame.K_UP in curr_input:
 				moveinput_dir[1] += -1
@@ -273,23 +301,49 @@ def main():
 				movelen = length(moveinput_dir)
 				player.dir = (moveinput_dir[0]/movelen, moveinput_dir[1]/movelen)
 
+			if pygame.K_RCTRL in curr_input:
+				player_dash(player)
+
 			if pygame.K_KP0 in curr_input and not pygame.K_KP0 in prev_input:
 				player_attack(player, player.jab_upgraded) #player.jab)
 			elif pygame.K_KP1 in curr_input and not pygame.K_KP1 in prev_input:
 				player_attack(player, player.uppercut)
 
-		elif player.state == 'dashing':
-			pass # can skip the cooldown period
+		elif player.currentaction.actiontype == 'dash':
+			if pygame.K_UP in curr_input:
+				moveinput_dir[1] += -1
+			if pygame.K_DOWN in curr_input:
+				moveinput_dir[1] += 1
+			if pygame.K_LEFT in curr_input:
+				moveinput_dir[0] += -1
+			if pygame.K_RIGHT in curr_input:
+				moveinput_dir[0] += 1
+			# face direction of movement whether colliding or not
+			if (moveinput_dir[0] != 0 or moveinput_dir[1] != 0):
+				movelen = length(moveinput_dir)
+				if (player.state != 'active'):
+					player.dir = (moveinput_dir[0]/movelen, moveinput_dir[1]/movelen)
 
-		elif player.state == 'blocking':
+			if pygame.K_RCTRL in curr_input and not pygame.K_RCTRL in prev_input:
+				player_dash(player)
+
+		elif player.currentaction.actiontype == 'blocking':
 			if ((pygame.K_KP0 in curr_input and not pygame.K_KP0 in prev_input) or
 				(pygame.K_KP1 in curr_input and not pygame.K_KP1 in prev_input)):
 				pass # attempt to parry
 
 		# movement calculation -> collision check -> update position
-		if (not blocking):
+		if (not player.currentaction.actiontype == 'block'):
 			# skip accel/friction for now
-			new_dp = [moveinput_dir[0]*speed, moveinput_dir[1]*speed]
+			direction = moveinput_dir[:]
+			curr_speed = speed
+			if (player.currentaction.actiontype == 'dash'):
+				direction = player.dir[:]
+				if (player.state == 'active'):
+					curr_speed = dashaction.speed
+				else:
+					curr_speed = 0
+			new_dp = [direction[0]*curr_speed, direction[1]*curr_speed]
 			new_p = [new_dp[0] + player.p[0], new_dp[1] + player.p[1]]
 
 			# check collision with new_p on geometry, entities and hurtboxes
@@ -316,10 +370,11 @@ def main():
 					collisionboxes.append(ehb)
 					collisionentities.append(e)
 
-			for h in hurtboxes:
-				hb = h.box
-				if (poly_collides(hb, new_p_box)):
-					collisionhbs.append(h)
+			if (not (player.currentaction.actiontype == 'dash' and player.state == 'active')):
+				for h in hurtboxes:
+					hb = h.box
+					if (poly_collides(hb, new_p_box)):
+						collisionhbs.append(h)
 
 			# move if not colliding
 			if (colliding):
@@ -355,6 +410,9 @@ def main():
 
 				if (bestp != False): 
 					player.p = bestp
+				elif player.currentaction.actiontype == 'dash' and player.state == 'active':
+					player.state = 'cooldown'
+					player.actionframe = dashaction.cooldown + dashaction.chainframes
 			else:
 				player.p = new_p
 
@@ -402,7 +460,7 @@ def main():
 			pygame.draw.polygon(screen, lightred, everts)
 
 		pygame.draw.circle(screen, red, midscreen, player.size//2)
-		if player.currentaction.actiontype == 'attack':
+		if player.currentaction.actiontype in ['attack', 'dash']:
 			pygame.draw.circle(screen, darkred, midscreen, player.size//2, 2)
 		#pygame.draw.polygon(screen, red, )
 
