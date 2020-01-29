@@ -60,15 +60,33 @@ def entity_get_hitbox(entity):
 	return [(x+entity.p[0], y+entity.p[1]) for (x, y) in entity.hitbox]
 
 class Hurtbox:
-	def __init__(self, box, frames, dir):
+	def __init__(self, box, frames, direction, speed):
 		self.box = box[:]
 		self.framesleft = frames
-		self.direction = dir
+		self.direction = direction
+		self.speed = speed
+		self.destroy = False
 
-def hurtbox_get(box, direction, position, frames):
+def hurtbox_get(box, direction, position, frames, speed):
 	hb = get_rotated_vecs(direction, box)
 	hb = [(x+position[0], y+position[1]) for (x, y) in hb]
-	return Hurtbox(hb, frames, direction)
+	return Hurtbox(hb, frames, direction, speed)
+
+def hurtbox_update(hurtbox, geometry):
+	# fixed time step, no need for delta time
+	vx = hurtbox.direction[0] * hurtbox.speed
+	vy = hurtbox.direction[1] * hurtbox.speed
+	if (hurtbox.speed > 0):
+		new_box = [(x+vx, y+vy) for (x, y) in hurtbox.box]
+
+		for g in geometry:
+			if (poly_collides(g, new_box)):
+				# destroy projectiles when they hit geometry
+				hurtbox.destroy = True
+
+		hurtbox.box = new_box
+
+	hurtbox.framesleft -= 1
 
 class NoneAction:
 	def __init__(self):
@@ -91,42 +109,60 @@ class Player:
 
 		self.jab = None
 		self.uppercut = None
+		self.jab_projectile = None
+		self.jab_upgraded = None
 
 def player_update(player, hurtboxes):
 	if (player.actionframe > 0):
 		player.actionframe -= 1
 	if (player.actionframe <= 0):
 		if player.currentaction.actiontype == 'attack':
-			if player.state == 'startup':
-				player.state = 'hurt'
-				player.actionframe = player.currentaction.hurtframes
-				hurtbox = [(x*player.size, y*player.size) \
-					for (x, y) in player.currentaction.box]
-				hurtboxes.append(hurtbox_get(
-					hurtbox, 
-					player.dir, 
-					player.p, 
-					player.currentaction.hurtframes))
-			elif player.state == 'hurt':
-				player.state = 'cooldown'
-				player.actionframe = player.currentaction.cooldown
-			elif player.state == 'cooldown':
-				player.state = 'idle'
-				player.currentaction = noneaction
+			continueprocessing = True
+			while (continueprocessing):
+				if player.state == 'startup':
+					player.state = 'active'
+					player.actionframe = player.currentaction.activeframes
+					hurtbox = [(x*player.size, y*player.size) \
+						for (x, y) in player.currentaction.box]
+					hurtboxes.append(hurtbox_get(
+						hurtbox, 
+						player.dir, 
+						player.p, 
+						player.currentaction.hurtframes,
+						player.currentaction.speed))
+				elif player.state == 'active':
+					player.state = 'cooldown'
+					player.actionframe = player.currentaction.cooldown
+				elif player.state == 'cooldown':
+					if (not player.currentaction.nextatk == None):
+						player_attack(player, player.currentaction.nextatk)
+					else:
+						player.state = 'idle'
+						player.currentaction = noneaction
+
+				# use this for chaining attacks (e.g. jab -> projectile)
+				if (player.actionframe > 0 or player.state == 'idle'):
+					continueprocessing = False
 				
 
 def player_attack(player, attack):
 	player.state = 'startup'
 	player.currentaction = attack
+	player.actionframe = attack.startup
 
 class Attack:
-	def __init__(self, startup, hurtframes, cooldown, box, nextatk=None):
+	def __init__(self, startup, activeframes, cooldown, box, hurtframes=0, speed=0, nextatk=None):
 		self.actiontype = 'attack'
 		self.startup = startup # frames int
-		self.hurtframes = hurtframes # frames int
+		self.activeframes = activeframes # frames before entering cooldown
 		self.cooldown = cooldown # frames int
 		self.box = box # use hurtbox_get to create object
+		self.speed = speed # for moving hit boxes
 		self.nextatk = nextatk # auto-start this next if not None
+
+		self.hurtframes = hurtframes # frames the hurtbox exists, default to activeframes
+		if (hurtframes == 0):
+			self.hurtframes = activeframes
 
 def main():
 	pygame.init()
@@ -183,11 +219,16 @@ def main():
 	player.movebox = [(.45, 0), (0, -0.45), (-0.45, 0), (0, 0.45)] 
 
 	player.jab = Attack(
-		1, 3, 5, 
+		1, 4, 20, 
 		[(0.55, 0.30), (1.20, 0.30), (1.20, -0.30), (0.55, -0.30)])
 	player.uppercut = Attack(
-		24, 6, 24,
+		24, 6, 36,
 		[(0.55, 0.30), (1.20, 0.30), (1.20, -0.30), (0.55, -0.30)])
+
+	player.jab_upgraded = Attack(
+		1, 4, 20, 
+		[(0.55, 0.30), (1.20, 0.30), (1.20, -0.30), (0.55, -0.30)],
+		hurtframes=30, speed=8)
 
 
 	prev_input = []
@@ -229,10 +270,11 @@ def main():
 				moveinput_dir[0] += 1
 			# face direction of movement whether colliding or not
 			if (moveinput_dir[0] != 0 or moveinput_dir[1] != 0):
-				player.dir = moveinput_dir[:]
+				movelen = length(moveinput_dir)
+				player.dir = (moveinput_dir[0]/movelen, moveinput_dir[1]/movelen)
 
 			if pygame.K_KP0 in curr_input and not pygame.K_KP0 in prev_input:
-				player_attack(player, player.jab)
+				player_attack(player, player.jab_upgraded) #player.jab)
 			elif pygame.K_KP1 in curr_input and not pygame.K_KP1 in prev_input:
 				player_attack(player, player.uppercut)
 
@@ -320,8 +362,8 @@ def main():
 
 		# clean hurtboxes
 		for h in hurtboxes:
-			h.framesleft -= 1
-		hurtboxes = [h for h in hurtboxes if h.framesleft > 0]
+			hurtbox_update(h, geometry)
+		hurtboxes = [h for h in hurtboxes if h.framesleft > 0 and not h.destroy]
 
 		'''
 		joystick = pygame.joystick.Joystick(0)
