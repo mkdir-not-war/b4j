@@ -45,9 +45,9 @@ def poly_collides(poly1, poly2):
 			return True
 	return False
 
-def get_screen_coord(playerpos, playeroff, worldx, worldy):
-	diffx = worldx-playerpos[0]
-	diffy = worldy-playerpos[1]
+def get_screen_coord(playerpos, playeroff, worldp):
+	diffx = worldp[0]-playerpos[0]
+	diffy = worldp[1]-playerpos[1]
 	return(playeroff[0]+diffx, playeroff[1]+diffy)
 
 class Entity:
@@ -71,12 +71,14 @@ def hurtbox_get(box, direction, position, frames, speed):
 	hb = [(x+position[0], y+position[1]) for (x, y) in hb]
 	return Hurtbox(hb, frames, direction, speed)
 
-def hurtbox_update(hurtbox, geometry):
+def hurtbox_update(hurtbox, geomap):
 	# fixed time step, no need for delta time
 	vx = hurtbox.direction[0] * hurtbox.speed
 	vy = hurtbox.direction[1] * hurtbox.speed
 	if (hurtbox.speed > 0):
 		new_box = [(x+vx, y+vy) for (x, y) in hurtbox.box]
+
+		geometry = geomap_gettilegeo_frombox(geomap, new_box)
 
 		for g in geometry:
 			if (poly_collides(g, new_box)):
@@ -193,6 +195,65 @@ class Attack:
 		if (hurtframes == 0):
 			self.hurtframes = activeframes
 
+class GeoMap:
+	def __init__(self, dimensions, geo):
+		self.width, self.height = dimensions
+		self.geo = geo # bool map of collidable geometry
+
+def geomap_checkpos(geomap, pos):
+	result = geomap.geo[geomap.width * pos[1] + pos[0]]
+	return result
+
+# position is center of object, dimensions is (width, height)
+def geomap_gettilegeo_frompos(geomap, position, dimensions):
+	px, py = position
+	w, h = dimensions
+
+	minx, miny = get_tile_pos((px-w/2, py-h/2))
+	maxx, maxy = get_tile_pos((px+w/2, py+h/2))
+
+	result = []
+	for i in range(minx, maxx+1):
+		for j in range(miny, maxy+1):
+			if (geomap_checkpos(geomap, (i, j))):
+				newtile = [(i*tilewidth, j*tilewidth), 
+					((i+1)*tilewidth, j*tilewidth), 
+					((i+1)*tilewidth, (j+1)*tilewidth), 
+					(i*tilewidth, (j+1)*tilewidth)]
+				result.append(newtile)
+	return result
+
+def geomap_gettilegeo_frombox(geomap, box):
+	result = []
+	for point in box:
+		i, j = get_tile_pos(point)
+		if (geomap_checkpos(geomap, (i, j))):
+			newtile = [(i*tilewidth, j*tilewidth), 
+				((i+1)*tilewidth, j*tilewidth), 
+				((i+1)*tilewidth, (j+1)*tilewidth), 
+				(i*tilewidth, (j+1)*tilewidth)]
+			result.append(newtile)
+	return result
+
+
+tilewidth = 50
+
+def get_tile_pos(worldpos):
+	wx, wy = worldpos
+	tx = int(wx // tilewidth)
+	if (wx < 0):
+		tx -= 1
+	ty = int(wy // tilewidth)
+	if (ty < 0):
+		ty -= 1
+	result = (tx, ty)
+	return result
+
+def get_world_pos(tilepos):
+	tx, ty = tilepos
+	result = (tx*tilewidth, ty*tilewidth)
+	return result
+
 def main():
 	pygame.init()
 
@@ -219,18 +280,19 @@ def main():
 	entities = []
 	hurtboxes = []
 
-	# populate walls
-	wallwidth = 50
+	tilemap = \
+		[True]*20 + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*4 + [True] + [False]*13 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True]*20
 
-	for i in range(20):
-		for j in range(20):
-			if j == 0 or i == 0 or j == 19 or i == 19 or (i%j==4 and j != 15):
-				geometry.append(
-					[(i*wallwidth, j*wallwidth), 
-					((i+1)*wallwidth, j*wallwidth), 
-					((i+1)*wallwidth, (j+1)*wallwidth), 
-					(i*wallwidth, (j+1)*wallwidth)]
-					)
+	geomap = GeoMap((20, 10), tilemap)
 
 	# throw in a couple baddies
 	baddy1 = Entity([150, 150])
@@ -358,6 +420,8 @@ def main():
 				vy = sy*player.size + new_p[1]
 				new_p_box.append((vx, vy))
 
+			geometry = geomap_gettilegeo_frompos(geomap, new_p, (.9*player.size, .9*player.size))
+
 			for p in geometry:
 				if (poly_collides(p, new_p_box)):
 					colliding = True
@@ -420,7 +484,7 @@ def main():
 
 		# clean hurtboxes
 		for h in hurtboxes:
-			hurtbox_update(h, geometry)
+			hurtbox_update(h, geomap)
 		hurtboxes = [h for h in hurtboxes if h.framesleft > 0 and not h.destroy]
 
 		'''
@@ -449,13 +513,17 @@ def main():
 			j += gridwidth
 
 		# draw entities
-		for e in geometry:
-			everts = [get_screen_coord(player.p, playeroffset, x, y) \
-				for (x, y) in e]
-			pygame.draw.polygon(screen, lightgrey, everts)
+		for y in range(geomap.height):
+			for x in range(geomap.width):
+				g = geomap.geo[y * geomap.width + x]
+				if (g):
+					newtile = [(x, y), ((x+1), y), ((x+1), (y+1)), (x, (y+1))]
+					everts = [get_screen_coord(player.p, playeroffset, get_world_pos(p)) \
+						for p in newtile]
+					pygame.draw.polygon(screen, lightgrey, everts)
 
 		for e in entities:
-			everts = [get_screen_coord(player.p, playeroffset, x+e.p[0], y+e.p[1]) \
+			everts = [get_screen_coord(player.p, playeroffset, (x+e.p[0], y+e.p[1])) \
 				for (x, y) in e.hitbox]
 			pygame.draw.polygon(screen, lightred, everts)
 
@@ -465,7 +533,7 @@ def main():
 		#pygame.draw.polygon(screen, red, )
 
 		for h in hurtboxes:
-			hverts = [get_screen_coord(player.p, playeroffset, x, y) for (x, y) in h.box]
+			hverts = [get_screen_coord(player.p, playeroffset, p) for p in h.box]
 			pygame.draw.polygon(screen, black, hverts, 1)
 
 
