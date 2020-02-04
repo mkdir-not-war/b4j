@@ -467,11 +467,13 @@ def main():
 					curr_speed = dashaction.speed
 				else:
 					curr_speed = 0
-			new_dp = [direction[0]*curr_speed, direction[1]*curr_speed]
-			new_p = [new_dp[0] + player.p[0], new_dp[1] + player.p[1]]
+			new_dp = [direction[0]*curr_speed, direction[1]*curr_speed] # use vec2 struct
+			new_p = [new_dp[0] + player.p[0], new_dp[1] + player.p[1]] # use vec2 struct
 
 			# check collision with new_p on geometry, entities and hurtboxes
 			colliding = False
+
+			# move these arrays out of the loop and just clear them here
 			collisionboxes = []
 			collisionentities = []
 			collisionhbs = []
