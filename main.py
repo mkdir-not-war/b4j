@@ -65,18 +65,34 @@ def entity_update_brain(entity):
 		brain_update(entity.brain)
 
 class EnemyType:
-	def __init_(self):
+	def __init_(self, name):
+		self.name = name
 		self.attacks = []
 		# attack objects, hp and range at which to use them
 		self.detectionradius = 0 # read by megabrain
+		self.initialbehavior
+
+# megabrain handles coordination between multiple hostile enemy AIs
+class MegaBrain:
+	def __init__(self, entities):
+		self.maxattacking = 3
+		self.brains = [e.brain for e in entities if e.brain != None and e.enemytype != None]
+
+def megabrain_update(megabrain, player):
+	# check stuff and set new behaviors if needed on the brains
+	for b in megabrain.brains:
+		pass
 
 class Brain:
-	def __init__(self, entity, initialbehavior):
+	def __init__(self, entity):
 		self.entity = entity
 		self.attacking = False # set by megabrain
 		self.movetarget = None # set by megabrain
-		self.currentbehavior = None
+		self.currentbehavior = 'idle'
 		self.timer = 0
+
+		if (entity.enemytype != None):
+			self.currentbehavior = entity.enemytype.initialbehavior
 
 def brain_update(brain):
 	if (brain.timer > 0):
@@ -85,8 +101,10 @@ def brain_update(brain):
 		behavior_idle_update(brain)
 	elif (brain.currentbehavior == 'patrol'):
 		behavior_patrol_update(brain)
+	elif (brain.currentbehavior == 'threaten'):
+		behavior_threaten_update(brain)
 	elif (brain.currentbehavior == 'attacking'):
-		behavior_attacking_update(brain)
+		behavior_attack_update(brain)
 
 def behavior_idle_update(brain):
 	pass
@@ -94,7 +112,10 @@ def behavior_idle_update(brain):
 def behavior_patrol_update(brain):
 	pass
 
-def behavior_attacking_update(brain):
+def behavior_threaten_update(brain):
+	pass
+
+def behavior_attack_update(brain):
 	# assume entity has enemytype
 	assert(brain.entity.enemytype != None)
 	
@@ -186,8 +207,7 @@ def player_update(player, hurtboxes):
 				if player.state == 'startup':
 					player.state = 'active'
 					player.actionframe = player.currentaction.activeframes
-					hurtbox = [(x*player.size, y*player.size) \
-						for (x, y) in player.currentaction.box]
+					hurtbox = [p for p in player.currentaction.box]
 					hurtboxes.append(hurtbox_get(
 						hurtbox, 
 						player.dir, 
@@ -339,29 +359,28 @@ def main():
 	baddy1 = Entity([150, 150])
 	baddy1.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
 	entities.append(baddy1)
-	baddy1brain = Brain(baddy1, 'idle')
+	baddy1brain = Brain(baddy1)
 	baddy1.brain = baddy1brain
 
 	# player stuff
 	playeroffset = midscreen
 	player = Player()
 	player.p = [100, 100]
-	player.size = 40 # aka diameter
 	speed = 3.7
 	player.dir = (0, 1)
 	# offset from player pos, as a factor of size
-	player.movebox = [(.45, 0), (0, -0.45), (-0.45, 0), (0, 0.45)] 
+	player.movebox = [(18, 0), (0, -18), (-18, 0), (0, 18)] 
 
 	player.jab = Attack(
 		1, 4, 20, 
-		[(0.55, 0.30), (1.20, 0.30), (1.20, -0.30), (0.55, -0.30)])
+		[(22, 12), (48, 12), (48, -12), (22, -12)])
 	player.uppercut = Attack(
 		24, 6, 36,
-		[(0.55, 0.30), (1.20, 0.30), (1.20, -0.30), (0.55, -0.30)])
+		[(22, 12), (48, 12), (48, -12), (22, -12)])
 
 	player.jab_upgraded = Attack(
 		1, 4, 20, 
-		[(0.55, 0.30), (1.20, 0.30), (1.20, -0.30), (0.55, -0.30)],
+		[(22, 12), (48, 12), (48, -12), (22, -12)],
 		hurtframes=30, speed=8)
 
 
@@ -459,11 +478,11 @@ def main():
 
 			new_p_box = []
 			for (sx, sy) in player.movebox:
-				vx = sx*player.size + new_p[0]
-				vy = sy*player.size + new_p[1]
+				vx = sx + new_p[0]
+				vy = sy + new_p[1]
 				new_p_box.append((vx, vy))
 
-			geometry = geomap_gettilegeo_frompos(geomap, new_p, (.9*player.size, .9*player.size))
+			geometry = geomap_gettilegeo_frompos(geomap, new_p, (36, 36))
 
 			for p in geometry:
 				if (poly_collides(p, new_p_box)):
@@ -503,8 +522,8 @@ def main():
 
 						test_p_box = []
 						for (sx, sy) in player.movebox:
-							vx = sx*player.size + test_p[0]
-							vy = sy*player.size + test_p[1]
+							vx = sx + test_p[0]
+							vy = sy + test_p[1]
 							test_p_box.append((vx, vy))
 
 						stillcollide = False
@@ -573,9 +592,9 @@ def main():
 				for (x, y) in e.hitbox]
 			pygame.draw.polygon(screen, lightred, everts)
 
-		pygame.draw.circle(screen, red, midscreen, player.size//2)
+		pygame.draw.circle(screen, red, midscreen, 18)
 		if player.currentaction.actiontype in ['attack', 'dash']:
-			pygame.draw.circle(screen, darkred, midscreen, player.size//2, 2)
+			pygame.draw.circle(screen, darkred, midscreen, 18, 2)
 		#pygame.draw.polygon(screen, red, )
 
 		for h in hurtboxes:
