@@ -54,9 +54,50 @@ class Entity:
 	def __init__(self, pos):
 		self.p = pos[:]
 		self.hitbox = None
+		self.brain = None
+		self.enemytype = None
 
 def entity_get_hitbox(entity):
 	return [(x+entity.p[0], y+entity.p[1]) for (x, y) in entity.hitbox]
+
+def entity_update_brain(entity):
+	if (entity.brain != None):
+		brain_update(entity.brain)
+
+class EnemyType:
+	def __init_(self):
+		self.attacks = []
+		# attack objects, hp and range at which to use them
+		self.detectionradius = 0 # read by megabrain
+
+class Brain:
+	def __init__(self, entity, initialbehavior):
+		self.entity = entity
+		self.attacking = False # set by megabrain
+		self.movetarget = None # set by megabrain
+		self.currentbehavior = None
+		self.timer = 0
+
+def brain_update(brain):
+	if (brain.timer > 0):
+		brain.timer -= 1
+	if (brain.currentbehavior == 'idle'):
+		behavior_idle_update(brain)
+	elif (brain.currentbehavior == 'patrol'):
+		behavior_patrol_update(brain)
+	elif (brain.currentbehavior == 'attacking'):
+		behavior_attacking_update(brain)
+
+def behavior_idle_update(brain):
+	pass
+
+def behavior_patrol_update(brain):
+	pass
+
+def behavior_attacking_update(brain):
+	# assume entity has enemytype
+	assert(brain.entity.enemytype != None)
+	
 
 class Hurtbox:
 	def __init__(self, box, frames, direction, speed):
@@ -298,6 +339,8 @@ def main():
 	baddy1 = Entity([150, 150])
 	baddy1.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
 	entities.append(baddy1)
+	baddy1brain = Brain(baddy1, 'idle')
+	baddy1.brain = baddy1brain
 
 	# player stuff
 	playeroffset = midscreen
@@ -494,6 +537,9 @@ def main():
 
 		# update logic based on collision and input
 		player_update(player, hurtboxes)
+
+		for e in entities:
+			entity_update_brain(e)
 
 		# draw
 		screen.fill(grey)
