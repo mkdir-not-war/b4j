@@ -2,10 +2,51 @@ import pygame
 from math import sqrt
 
 def dot(v1, v2):
-	return v1[0]*v2[0] + v1[1]*v2[1]
+	result = v1[0]*v2[0] + v1[1]*v2[1]
+	return result
 
 def length(v):
-	return sqrt(v[0]**2 + v[1]**2)
+	result = sqrt(v[0]**2 + v[1]**2)
+	return result
+
+def arrayget(array, width, p):
+	x, y = p
+	result = array[y*width + x]
+	return result
+
+def arrayset(array, width, p, val):
+	x, y = p
+	array[y*width + x] = val
+
+# define floodfill arrays out of scope in C# so it doesn't call GC a ton
+def floodfill(geomap, *pos, dist=None, bias=None):
+	currdist = 0
+	height, width = geomap.height, geomap.width
+	colormap = [False] * (height*width) # size of map
+	for p in pos:
+		arrayset(colormap, width, p, True)
+	border = [] # size of (height+width)*2
+	border.extend(pos)
+	result = [] # size of (width*height)
+
+	while ((dist==None or currdist < dist) and len(border) > 0):
+		rx, ry = border.pop(0)
+		for dx, dy in [(1, 0), (0, 1), (-1, 0), (0, -1)]:
+				v = (rx+dx, ry+dy)
+				
+				if (not geomap_checkpos(geomap, v) and not arrayget(colormap, width, v)):
+					arrayset(colormap, width, v, True)
+					result.append(v)
+					border.append(v)
+				if (bias != None):
+					vbiased = (rx+dx+bias[0], rx+dx+bias[1])
+					if (not geomap_checkpos(geomap, v) and not arrayget(colormap, width, v)):
+						arrayset(colormap, width, v, True)
+						result.append(v)
+						border.append(v)
+		currdist += 1
+
+	return result
 
 # assumes u = (1, 0)
 def get_rotated_vecs(v, vecs):
@@ -51,8 +92,9 @@ def get_screen_coord(playerpos, playeroff, worldp):
 	return(playeroff[0]+diffx, playeroff[1]+diffy)
 
 class Entity:
-	def __init__(self, pos):
+	def __init__(self, pos, direction=(0,1)):
 		self.p = pos[:]
+		self.direction = direction[:]
 		self.hitbox = None
 		self.brain = None
 		self.enemytype = None
@@ -65,23 +107,66 @@ def entity_update_brain(entity):
 		brain_update(entity.brain)
 
 class EnemyType:
-	def __init_(self, name):
+	def __init__(self, name, dr, ib):
 		self.name = name
 		self.attacks = []
 		# attack objects, hp and range at which to use them
-		self.detectionradius = 0 # read by megabrain
-		self.initialbehavior
+		self.detectionradius = dr # read by megabrain
+		self.initialbehavior = ib # read by megabrain
+
+et_basiccreature = EnemyType('basic creature', 2, 'idle')
 
 # megabrain handles coordination between multiple hostile enemy AIs
 class MegaBrain:
 	def __init__(self, entities):
+		self.maxtime = 10
+		self.timer = self.maxtime
 		self.maxattacking = 3
 		self.brains = [e.brain for e in entities if e.brain != None and e.enemytype != None]
 
-def megabrain_update(megabrain, player):
+def megabrain_updatetimer(megabrain):
+	megabrain.timer -= 1
+	if (megabrain.timer <= 0):
+		megabrain.timer = megabrain.maxtime
+
+stufftodraw = []
+
+def megabrain_update(megabrain, geomap, player, screen):
+	global stufftodraw
+	stufftodraw.clear()
+
 	# check stuff and set new behaviors if needed on the brains
 	for b in megabrain.brains:
-		pass
+		e = b.entity
+		# check if player is in detection range
+		if b.currentbehavior in ['idle', 'patrol']:
+			player_tile = get_tile_pos(player.p)
+			e_tiles = [get_tile_pos((x+e.p[0], y+e.p[1])) for (x, y) in e.hitbox]
+			if (player_tile in e_tiles):
+				b.currentbehavior = 'threaten'
+				print('threaten!')
+			else:
+				detection_tiles = floodfill(
+					geomap, 
+					*e_tiles, 
+					dist = e.enemytype.detectionradius, 
+					bias = e.direction)
+				#####################################
+				for t in detection_tiles:
+					i, j = get_world_pos(t)
+					newtile = [(i, j), 
+						(i+tilewidth, j), 
+						(i+tilewidth, j+tilewidth), 
+						(i, j+tilewidth)]
+					stufftodraw.append(newtile)
+				#####################################
+				if (player_tile in detection_tiles):
+					b.currentbehavior = 'threaten'
+					print('threaten!')
+				
+
+	megabrain_updatetimer(megabrain)
+
 
 class Brain:
 	def __init__(self, entity):
@@ -348,7 +433,7 @@ def main():
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*4 + [True] + [False]*13 + [True] + \
-		[True] + [False]*18 + [True] + \
+		[True] + [False]*4 + [True]*2 + [False]*12 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True]*20
@@ -356,11 +441,15 @@ def main():
 	geomap = GeoMap((20, 10), tilemap)
 
 	# throw in a couple baddies
-	baddy1 = Entity([150, 150])
+	baddy1 = Entity([300, 150])
 	baddy1.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
+	baddy1.enemytype = et_basiccreature
 	entities.append(baddy1)
 	baddy1brain = Brain(baddy1)
 	baddy1.brain = baddy1brain
+
+	# start up mega brain
+	megabrain = MegaBrain(entities)
 
 	# player stuff
 	playeroffset = midscreen
@@ -559,6 +648,8 @@ def main():
 		# update logic based on collision and input
 		player_update(player, hurtboxes)
 
+		megabrain_update(megabrain, geomap, player, screen)
+
 		for e in entities:
 			entity_update_brain(e)
 
@@ -603,6 +694,10 @@ def main():
 			hverts = [get_screen_coord(player.p, playeroffset, p) for p in h.box]
 			pygame.draw.polygon(screen, black, hverts, 1)
 
+		global stufftodraw
+		for h in stufftodraw:
+			hverts = [get_screen_coord(player.p, playeroffset, p) for p in h]
+			pygame.draw.polygon(screen, black, hverts, 1)
 
 		pygame.display.flip()
 
