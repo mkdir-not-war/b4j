@@ -18,33 +18,126 @@ def arrayset(array, width, p, val):
 	x, y = p
 	array[y*width + x] = val
 
+def insertnode(node, val, list):
+	index = -1
+	i = 0
+	while i < len(list) and index < 0:
+		if val <= list[i][1]:
+			break
+		else:
+			i += 1
+	index = i
+	list.insert(index, (node, val))
+
 # define floodfill arrays out of scope in C# so it doesn't call GC a ton
-def floodfill(geomap, *pos, dist=None, bias=None):
-	currdist = 0
+def floodfill(geomap, *pos, dist=None):
 	height, width = geomap.height, geomap.width
 	colormap = [False] * (height*width) # size of map
 	for p in pos:
 		arrayset(colormap, width, p, True)
 	border = [] # size of (height+width)*2
-	border.extend(pos)
+	for p in pos:
+		border.append((p, 0))
 	result = [] # size of (width*height)
+	result.extend(pos)
 
-	while ((dist==None or currdist < dist) and len(border) > 0):
-		rx, ry = border.pop(0)
+	while (len(border) > 0 and (dist==None or border[0][1] <= dist)):
+		r, rdist = border.pop(0)
+		rx, ry = r
 		for dx, dy in [(1, 0), (0, 1), (-1, 0), (0, -1)]:
 				v = (rx+dx, ry+dy)
 				
-				if (not geomap_checkpos(geomap, v) and not arrayget(colormap, width, v)):
+				if (not geomap_iscollision(geomap, v) and \
+					not arrayget(colormap, width, v)):
+
 					arrayset(colormap, width, v, True)
-					result.append(v)
-					border.append(v)
-				if (bias != None):
-					vbiased = (rx+dx+bias[0], rx+dx+bias[1])
-					if (not geomap_checkpos(geomap, v) and not arrayget(colormap, width, v)):
-						arrayset(colormap, width, v, True)
-						result.append(v)
-						border.append(v)
-		currdist += 1
+					if (rdist+1 <= dist):
+							result.append(v)
+					insertnode(v, rdist+1, border)
+
+	return result
+
+def sign(n):
+	if (n < 0):
+		return -1
+	elif (n > 0):
+		return 1
+	else:
+		return 0
+
+def bresenham_v(src, dest, result):
+	x = src[0]
+	for y in range(src[1], dest[1]+1):
+		result.append((x, y))
+
+def bresenham_h(src, dest, result):
+	y = src[1]
+	for x in range(src[0], dest[0]+1):
+		result.append((x, y))
+
+def bresenham(src, dest):
+	result = []
+
+	dx = dest[0] - src[0]
+	dy = dest[1] - src[1]
+
+	if dy == 0:
+		bresenham_h(src, dest, result)
+		return result
+	elif dx == 0:
+		bresenham_v(src, dest, result)
+		return result
+
+	err = 0.0
+
+	# if diff in x is larger, increment in x. If delta-x is small but y is big, increment y
+	if (dx**2 > dy**2):
+		derr = abs(dy / dx)
+		y = src[1]
+		for x in range(src[0], dest[0]):
+			result.append((x, int(y)))
+			err += derr
+			if err >= 0.5:
+				y += sign(dy)
+				err -= 1.0
+	else:
+		derr = abs(dx / dy)
+		x = src[0]
+		for y in range(src[1], dest[1]):
+			result.append((x, int(y)))
+			err += derr
+			if err >= 0.5:
+				x += sign(dx)
+				err -= 1.0
+
+	result.append(dest)
+	return result
+
+def get_tile_raycast(geomap, pos, direction, maxdist=100):
+	dest = (int(pos[0]+0.5+direction[0]*maxdist), int(pos[1]+0.5+direction[1]*maxdist))
+	points2check = bresenham(pos, dest)
+	index = 1
+	for i in range(len(points2check)):
+		if (not geomap_iscollision(geomap, points2check[i])):
+			index = i
+		else:
+			break
+
+	return points2check[:index+1]
+
+
+def get_area_in_direction(geomap, direction, *pos, dist=1):
+	height, width = geomap.height, geomap.width
+	
+	colormap = [False] * (height*width) # size of map
+	result = []
+
+	for p in pos:
+		raycastlist = get_tile_raycast(geomap, p, direction, maxdist=dist)
+		for newtile in raycastlist:
+			if (not arrayget(colormap, width, newtile)):
+				arrayset(colormap, width, newtile, True)
+				result.append(newtile)
 
 	return result
 
@@ -94,7 +187,7 @@ def get_screen_coord(playerpos, playeroff, worldp):
 class Entity:
 	def __init__(self, pos, direction=(0,1)):
 		self.p = pos[:]
-		self.direction = direction[:]
+		self.direction = direction[:] #(0.316227, 0.9486765)#
 		self.hitbox = None
 		self.brain = None
 		self.enemytype = None
@@ -114,7 +207,7 @@ class EnemyType:
 		self.detectionradius = dr # read by megabrain
 		self.initialbehavior = ib # read by megabrain
 
-et_basiccreature = EnemyType('basic creature', 2, 'idle')
+et_basiccreature = EnemyType('basic creature', 4, 'idle')
 
 # megabrain handles coordination between multiple hostile enemy AIs
 class MegaBrain:
@@ -146,11 +239,11 @@ def megabrain_update(megabrain, geomap, player, screen):
 				b.currentbehavior = 'threaten'
 				print('threaten!')
 			else:
-				detection_tiles = floodfill(
+				detection_tiles = get_area_in_direction(
 					geomap, 
-					*e_tiles, 
-					dist = e.enemytype.detectionradius, 
-					bias = e.direction)
+					e.direction,
+					*e_tiles,
+					dist = e.enemytype.detectionradius)
 				#####################################
 				for t in detection_tiles:
 					i, j = get_world_pos(t)
@@ -346,7 +439,7 @@ class GeoMap:
 		self.width, self.height = dimensions
 		self.geo = geo # bool map of collidable geometry
 
-def geomap_checkpos(geomap, pos):
+def geomap_iscollision(geomap, pos):
 	result = geomap.geo[geomap.width * pos[1] + pos[0]]
 	return result
 
@@ -361,7 +454,7 @@ def geomap_gettilegeo_frompos(geomap, position, dimensions):
 	result = []
 	for i in range(minx, maxx+1):
 		for j in range(miny, maxy+1):
-			if (geomap_checkpos(geomap, (i, j))):
+			if (geomap_iscollision(geomap, (i, j))):
 				newtile = [(i*tilewidth, j*tilewidth), 
 					((i+1)*tilewidth, j*tilewidth), 
 					((i+1)*tilewidth, (j+1)*tilewidth), 
@@ -373,7 +466,7 @@ def geomap_gettilegeo_frombox(geomap, box):
 	result = []
 	for point in box:
 		i, j = get_tile_pos(point)
-		if (geomap_checkpos(geomap, (i, j))):
+		if (geomap_iscollision(geomap, (i, j))):
 			newtile = [(i*tilewidth, j*tilewidth), 
 				((i+1)*tilewidth, j*tilewidth), 
 				((i+1)*tilewidth, (j+1)*tilewidth), 
@@ -432,7 +525,7 @@ def main():
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
-		[True] + [False]*4 + [True] + [False]*13 + [True] + \
+		[True] + [False]*4 + [True] + [False]*2 + [True] + [False]*10 + [True] + \
 		[True] + [False]*4 + [True]*2 + [False]*12 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
