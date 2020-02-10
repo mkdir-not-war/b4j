@@ -9,6 +9,11 @@ def length(v):
 	result = sqrt(v[0]**2 + v[1]**2)
 	return result
 
+def normalize(v):
+	vlen = length(v)
+	result = (v[0]/vlen, v[1]/vlen)
+	return result
+
 def arrayget(array, width, p):
 	x, y = p
 	result = array[y*width + x]
@@ -187,7 +192,7 @@ def get_screen_coord(playerpos, playeroff, worldp):
 class Entity:
 	def __init__(self, pos, direction=(0,1)):
 		self.p = pos[:]
-		self.direction = direction[:] #(0.316227, 0.9486765)#
+		self.direction = (0.7, -0.7)#direction[:] #(0.316227, 0.9486765)#
 		self.hitbox = None
 		self.brain = None
 		self.enemytype = None
@@ -195,19 +200,28 @@ class Entity:
 def entity_get_hitbox(entity):
 	return [(x+entity.p[0], y+entity.p[1]) for (x, y) in entity.hitbox]
 
+'''
 def entity_update_brain(entity):
 	if (entity.brain != None):
 		brain_update(entity.brain)
+'''
+
+def entity_update_physics(entity):
+	if (entity.brain.movetarget != None):
+		entity.direction = normalize((
+			entity.brain.movetarget[0]-entity.p[0], 
+			entity.brain.movetarget[1]-entity.p[1]))
 
 class EnemyType:
-	def __init__(self, name, dr, ib):
+	def __init__(self, name, dr, ib, t2f):
 		self.name = name
 		self.attacks = []
 		# attack objects, hp and range at which to use them
 		self.detectionradius = dr # read by megabrain
 		self.initialbehavior = ib # read by megabrain
+		self.time2forget = int(t2f*30) # time in seconds that this enemy will search for player
 
-et_basiccreature = EnemyType('basic creature', 4, 'idle')
+et_basiccreature = EnemyType('basic creature', 3, 'idle', 6)
 
 # megabrain handles coordination between multiple hostile enemy AIs
 class MegaBrain:
@@ -222,7 +236,7 @@ def megabrain_updatetimer(megabrain):
 	if (megabrain.timer <= 0):
 		megabrain.timer = megabrain.maxtime
 
-stufftodraw = []
+stufftodraw = [] ############################################### debug art #######################
 
 def megabrain_update(megabrain, geomap, player, screen):
 	global stufftodraw
@@ -231,33 +245,44 @@ def megabrain_update(megabrain, geomap, player, screen):
 	# check stuff and set new behaviors if needed on the brains
 	for b in megabrain.brains:
 		e = b.entity
-		# check if player is in detection range
-		if b.currentbehavior in ['idle', 'patrol']:
-			player_tile = get_tile_pos(player.p)
-			e_tiles = [get_tile_pos((x+e.p[0], y+e.p[1])) for (x, y) in e.hitbox]
-			if (player_tile in e_tiles):
-				b.currentbehavior = 'threaten'
-				print('threaten!')
-			else:
-				detection_tiles = get_area_in_direction(
-					geomap, 
-					e.direction,
-					*e_tiles,
-					dist = e.enemytype.detectionradius)
-				#####################################
-				for t in detection_tiles:
-					i, j = get_world_pos(t)
-					newtile = [(i, j), 
-						(i+tilewidth, j), 
-						(i+tilewidth, j+tilewidth), 
-						(i, j+tilewidth)]
-					stufftodraw.append(newtile)
-				#####################################
-				if (player_tile in detection_tiles):
-					b.currentbehavior = 'threaten'
-					print('threaten!')
-				
 
+		# check if player is in detection range
+		player_detected = False
+		player_tile = get_tile_pos(player.p)
+		e_tiles = [get_tile_pos((x+e.p[0], y+e.p[1])) for (x, y) in e.hitbox]
+		if (player_tile in e_tiles):
+			player_detected = True
+		else:
+			detection_tiles = get_area_in_direction(
+				geomap, 
+				e.direction,
+				*e_tiles,
+				dist = e.enemytype.detectionradius)
+			if (player_tile in detection_tiles):
+				player_detected = True
+			#####################################
+			for t in detection_tiles:
+				i, j = get_world_pos(t)
+				newtile = [(i, j), 
+					(i+tilewidth, j), 
+					(i+tilewidth, j+tilewidth), 
+					(i, j+tilewidth)]
+				stufftodraw.append(newtile)
+			#####################################
+
+
+		if b.currentbehavior in ['idle', 'patrol']:
+			if (player_detected):
+				print('threaten!')
+				b.currentbehavior = 'threaten'
+		if b.currentbehavior == 'threaten':
+			if megabrain.timer == 1:
+				# update path finding, set b.movetarget
+				b.movetarget = player.p
+		if b.currentbehavior == 'attack':
+			# randomly choose from the set of attacks the brain is currently at range to use
+			pass
+				
 	megabrain_updatetimer(megabrain)
 
 
@@ -268,10 +293,14 @@ class Brain:
 		self.movetarget = None # set by megabrain
 		self.currentbehavior = 'idle'
 		self.timer = 0
+		self.timesincedetection = 0
 
 		if (entity.enemytype != None):
 			self.currentbehavior = entity.enemytype.initialbehavior
 
+# I don't think there necessarily needs to be brain update code.
+# Just do it all in the megabrain update for-loop through the brains.
+'''
 def brain_update(brain):
 	if (brain.timer > 0):
 		brain.timer -= 1
@@ -296,6 +325,7 @@ def behavior_threaten_update(brain):
 def behavior_attack_update(brain):
 	# assume entity has enemytype
 	assert(brain.entity.enemytype != None)
+'''
 	
 
 class Hurtbox:
@@ -744,7 +774,8 @@ def main():
 		megabrain_update(megabrain, geomap, player, screen)
 
 		for e in entities:
-			entity_update_brain(e)
+			#entity_update_brain(e)
+			entity_update_physics(e)
 
 		# draw
 		screen.fill(grey)
