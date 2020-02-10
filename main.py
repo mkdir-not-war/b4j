@@ -87,35 +87,65 @@ def bresenham(src, dest):
 	dy = dest[1] - src[1]
 
 	if dy == 0:
-		bresenham_h(src, dest, result)
-		return result
+		if (dx > 0):
+			bresenham_h(src, dest, result)
+			return result
+		else:
+			bresenham_h(dest, src, result)
+			return result[::-1]
+		
 	elif dx == 0:
-		bresenham_v(src, dest, result)
-		return result
+		if (dy > 0):
+			bresenham_v(src, dest, result)
+			return result
+		else:
+			bresenham_v(dest, src, result)
+			return result[::-1]
 
 	err = 0.0
 
 	# if diff in x is larger, increment in x. If delta-x is small but y is big, increment y
 	if (dx**2 > dy**2):
 		derr = abs(dy / dx)
-		y = src[1]
-		for x in range(src[0], dest[0]):
-			result.append((x, int(y)))
-			err += derr
-			if err >= 0.5:
-				y += sign(dy)
-				err -= 1.0
+		if (dx > 0):
+			y = src[1]
+			for x in range(src[0], dest[0]):
+				result.append((x, int(y)))
+				err += derr
+				if err >= 0.5:
+					y += sign(dy)
+					err -= 1.0
+			result.append(dest)
+		else:
+			y = dest[1]
+			for x in range(dest[0], src[0]):
+				result.insert(0, (x, int(y)))
+				err += derr
+				if err >= 0.5:
+					y -= sign(dy)
+					err += 1.0
+			result.insert(0, src)
 	else:
 		derr = abs(dx / dy)
-		x = src[0]
-		for y in range(src[1], dest[1]):
-			result.append((x, int(y)))
-			err += derr
-			if err >= 0.5:
-				x += sign(dx)
-				err -= 1.0
-
-	result.append(dest)
+		if (dy > 0):
+			x = src[0]
+			for y in range(src[1], dest[1]):
+				result.append((x, int(y)))
+				err += derr
+				if err >= 0.5:
+					x += sign(dx)
+					err -= 1.0
+			result.append(dest)
+		else:
+			x = dest[0]
+			for y in range(dest[1], src[1]):
+				result.insert(0, (x, int(y)))
+				err += derr
+				if err >= 0.5:
+					x -= sign(dx)
+					err += 1.0
+			result.insert(0, src)
+	
 	return result
 
 def get_tile_raycast(geomap, pos, direction, maxdist=100):
@@ -192,7 +222,7 @@ def get_screen_coord(playerpos, playeroff, worldp):
 class Entity:
 	def __init__(self, pos, direction=(0,1)):
 		self.p = pos[:]
-		self.direction = (0.7, -0.7)#direction[:] #(0.316227, 0.9486765)#
+		self.direction = (-0.7, -0.7)#direction[:] #(0.316227, 0.9486765)#
 		self.hitbox = None
 		self.brain = None
 		self.enemytype = None
