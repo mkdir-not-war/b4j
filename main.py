@@ -190,6 +190,10 @@ def get_rotated_vecs(v, vecs):
 		result.append((x2, y2))
 	return result
 
+def distance_less_than(p1, p2, dist):
+	result = ((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2 < dist**2)
+	return result
+
 def poly_contains(polygon, x, y):
 	numverts = len(polygon)
 	intersections = 0
@@ -220,9 +224,10 @@ def get_screen_coord(playerpos, playeroff, worldp):
 	return(playeroff[0]+diffx, playeroff[1]+diffy)
 
 class Entity:
-	def __init__(self, pos, direction=(0,1)):
+	def __init__(self, pos, speed=3.0, direction=(0,1)):
 		self.p = pos[:]
-		self.direction = (-0.7, -0.7)#direction[:] #(0.316227, 0.9486765)#
+		self.speed = speed
+		self.direction = direction[:]
 		self.hitbox = None
 		self.brain = None
 		self.enemytype = None
@@ -237,10 +242,16 @@ def entity_update_brain(entity):
 '''
 
 def entity_update_physics(entity):
-	if (entity.brain.movetarget != None):
+	movetarget = entity.brain.movetarget
+	if (movetarget != None):
 		entity.direction = normalize((
-			entity.brain.movetarget[0]-entity.p[0], 
-			entity.brain.movetarget[1]-entity.p[1]))
+			movetarget[0]-entity.p[0], 
+			movetarget[1]-entity.p[1]))
+		new_p = (
+			entity.p[0] + entity.direction[0] * entity.speed,
+			entity.p[1] + entity.direction[1] * entity.speed)
+		if not distance_less_than(new_p, movetarget, tilewidth):
+			entity.p = new_p
 
 class EnemyType:
 	def __init__(self, name, dr, ib, t2f):
@@ -250,6 +261,7 @@ class EnemyType:
 		self.detectionradius = dr # read by megabrain
 		self.initialbehavior = ib # read by megabrain
 		self.time2forget = int(t2f*30) # time in seconds that this enemy will search for player
+		self.patrolnodes = []
 
 et_basiccreature = EnemyType('basic creature', 3, 'idle', 6)
 
@@ -301,20 +313,17 @@ def megabrain_update(megabrain, geomap, player, screen):
 			#####################################
 
 
-		if b.currentbehavior in ['idle', 'patrol']:
-			if (player_detected):
-				print('threaten!')
-				b.currentbehavior = 'threaten'
-		if b.currentbehavior == 'threaten':
-			if megabrain.timer == 1:
-				# update path finding, set b.movetarget
-				b.movetarget = player.p
-		if b.currentbehavior == 'attack':
+		if b.currentbehavior == 'idle':
+			behavior_idle_update(b, geomap, player_detected)
+		elif b.currentbehavior == 'patrol':
+			behavior_patrol_update(b, geomap, player_detected)
+		elif b.currentbehavior == 'threaten':
+			behavior_threaten_update(b, geomap, player, megabrain, player_detected)
+		elif b.currentbehavior == 'attack':
 			# randomly choose from the set of attacks the brain is currently at range to use
 			pass
 				
 	megabrain_updatetimer(megabrain)
-
 
 class Brain:
 	def __init__(self, entity):
@@ -324,39 +333,35 @@ class Brain:
 		self.currentbehavior = 'idle'
 		self.timer = 0
 		self.timesincedetection = 0
+		self.patrolnodeindex = 0
 
 		if (entity.enemytype != None):
 			self.currentbehavior = entity.enemytype.initialbehavior
 
-# I don't think there necessarily needs to be brain update code.
-# Just do it all in the megabrain update for-loop through the brains.
-'''
-def brain_update(brain):
-	if (brain.timer > 0):
-		brain.timer -= 1
-	if (brain.currentbehavior == 'idle'):
-		behavior_idle_update(brain)
-	elif (brain.currentbehavior == 'patrol'):
-		behavior_patrol_update(brain)
-	elif (brain.currentbehavior == 'threaten'):
-		behavior_threaten_update(brain)
-	elif (brain.currentbehavior == 'attacking'):
-		behavior_attack_update(brain)
+def behavior_idle_update(b, geomap, player_detected):
+	if (player_detected):
+		print('threaten!')
+		b.currentbehavior = 'threaten'
 
-def behavior_idle_update(brain):
-	pass
+def behavior_patrol_update(b, geomap, player_detected):
+	if (player_detected):
+		print('threaten!')
+		b.currentbehavior = 'threaten'
+	# assumes nodes are always reachable directly from previous nodes, no collision
+	elif (get_tile_pos(b.entity.p) == get_tile_pos(b.movetarget)):
+		b.patrolnodeindex -= 1
+		if (b.patrolnodeindex < 0):
+			b.patrolnodeindex = len(b.enemytype.patrolnodes)
+		b.movetarget = b.enemytype.patrolnodes[b.patrolnodeindex]
 
-def behavior_patrol_update(brain):
-	pass
+def behavior_threaten_update(b, geomap, player, mb, player_detected):
+	if mb.timer == 1:
+		# update path finding, set b.movetarget
+		b.movetarget = player.p
 
-def behavior_threaten_update(brain):
-	pass
-
-def behavior_attack_update(brain):
+def behavior_attack_update(b, geomap, player, mb, player_detected):
 	# assume entity has enemytype
 	assert(brain.entity.enemytype != None)
-'''
-	
 
 class Hurtbox:
 	def __init__(self, box, frames, direction, speed):
