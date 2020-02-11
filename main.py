@@ -123,7 +123,7 @@ def bresenham(src, dest):
 				err += derr
 				if err >= 0.5:
 					y -= sign(dy)
-					err += 1.0
+					err -= 1.0
 			result.insert(0, src)
 	else:
 		derr = abs(dx / dy)
@@ -143,7 +143,7 @@ def bresenham(src, dest):
 				err += derr
 				if err >= 0.5:
 					x -= sign(dx)
-					err += 1.0
+					err -= 1.0
 			result.insert(0, src)
 	
 	return result
@@ -224,9 +224,8 @@ def get_screen_coord(playerpos, playeroff, worldp):
 	return(playeroff[0]+diffx, playeroff[1]+diffy)
 
 class Entity:
-	def __init__(self, pos, speed=3.0, direction=(0,1)):
+	def __init__(self, pos, direction=(0,1)):
 		self.p = pos[:]
-		self.speed = speed
 		self.direction = direction[:]
 		self.hitbox = None
 		self.brain = None
@@ -242,28 +241,33 @@ def entity_update_brain(entity):
 '''
 
 def entity_update_physics(entity):
+	if (entity.enemytype == None or entity.brain == None):
+		return
+	speed = entity.enemytype.speed
 	movetarget = entity.brain.movetarget
 	if (movetarget != None):
 		entity.direction = normalize((
 			movetarget[0]-entity.p[0], 
 			movetarget[1]-entity.p[1]))
-		new_p = (
-			entity.p[0] + entity.direction[0] * entity.speed,
-			entity.p[1] + entity.direction[1] * entity.speed)
-		if not distance_less_than(new_p, movetarget, tilewidth):
-			entity.p = new_p
+		if (speed > 0):
+			new_p = (
+				entity.p[0] + entity.direction[0] * speed,
+				entity.p[1] + entity.direction[1] * speed)
+			if not distance_less_than(new_p, movetarget, tilewidth):
+				entity.p = new_p
 
 class EnemyType:
-	def __init__(self, name, dr, ib, t2f):
+	def __init__(self, name, dr, ib, t2f, speed=0):
 		self.name = name
 		self.attacks = []
 		# attack objects, hp and range at which to use them
 		self.detectionradius = dr # read by megabrain
 		self.initialbehavior = ib # read by megabrain
 		self.time2forget = int(t2f*30) # time in seconds that this enemy will search for player
+		self.speed = speed
 		self.patrolnodes = []
 
-et_basiccreature = EnemyType('basic creature', 3, 'idle', 6)
+et_basiccreature = EnemyType('basic creature', 5, 'idle', 6)
 
 # megabrain handles coordination between multiple hostile enemy AIs
 class MegaBrain:
@@ -569,8 +573,8 @@ def main():
 	black = pygame.Color('black')
 
 	# Set the width and height of the screen (width, height).
-	screendim = (700, 500)
-	midscreen = (350, 250)
+	screendim = (1050, 750)
+	midscreen = (screendim[0]//2, screendim[1]//2)
 	screen = pygame.display.set_mode(screendim)
 	pygame.display.set_caption("B4J prototype")
 
@@ -594,17 +598,32 @@ def main():
 		[True] + [False]*4 + [True]*2 + [False]*12 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*18 + [True] + \
 		[True]*20
 
-	geomap = GeoMap((20, 10), tilemap)
+	geomap = GeoMap((20, 20), tilemap)
 
 	# throw in a couple baddies
 	baddy1 = Entity([300, 150])
 	baddy1.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
 	baddy1.enemytype = et_basiccreature
 	entities.append(baddy1)
-	baddy1brain = Brain(baddy1)
-	baddy1.brain = baddy1brain
+	baddy1.brain = Brain(baddy1)
+
+	baddy2 = Entity([600, 500])
+	baddy2.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
+	baddy2.enemytype = et_basiccreature
+	entities.append(baddy2)
+	baddy2.brain = Brain(baddy2)
 
 	# start up mega brain
 	megabrain = MegaBrain(entities)
@@ -815,19 +834,12 @@ def main():
 		# draw
 		screen.fill(grey)
 
-		# draw background grid
-		gridwidth = 50
-		gridoffx = gridwidth - player.p[0]%gridwidth
-		gridoffy = gridwidth - player.p[1]%gridwidth
-		i = gridoffx
-		while i <= 700:
-			pygame.draw.line(screen, lightgrey, (i, 0), (i, 501))
-			i += gridwidth
-
-		j = gridoffy
-		while j <= 500:
-			pygame.draw.line(screen, lightgrey, (0, j), (701, j))
-			j += gridwidth
+		# draw background dots
+		joffset = int(tilewidth-player.p[1]%tilewidth) - tilewidth//2
+		ioffset = int(tilewidth-player.p[0]%tilewidth) - tilewidth//2
+		for j in range(joffset, screendim[1]+1, tilewidth):
+			for i in range(ioffset, screendim[0]+1, tilewidth):
+				pygame.draw.circle(screen, lightgrey, (i, j), 1, 1)
 
 		# draw entities
 		for y in range(geomap.height):
