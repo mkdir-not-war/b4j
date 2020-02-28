@@ -275,6 +275,7 @@ class MegaBrain:
 		self.maxtime = 10
 		self.timer = self.maxtime
 		self.maxattacking = 3
+		self.currentattacking = 0
 		self.brains = [e.brain for e in entities if e.brain != None and e.enemytype != None]
 
 def megabrain_updatetimer(megabrain):
@@ -324,15 +325,29 @@ def megabrain_update(megabrain, geomap, player, screen):
 		elif b.currentbehavior == 'threaten':
 			behavior_threaten_update(b, geomap, player, megabrain, player_detected)
 		elif b.currentbehavior == 'attack':
-			# randomly choose from the set of attacks the brain is currently at range to use
-			pass
+			behavior_attack_update(b, geomap, player, megabrain)
+
+	# pick attackers
+	if (megabrain.currentattacking < megabrain.maxattacking):
+		# shuffle the brains, maybe divide spacially so that more likely to have attacks from
+		# mutliple directions instead of only just one direction?? Need to test for feel.
+		for b in megabrain.brains:
+			if b.currentbehavior == 'threaten':
+				if (len(b.attacksinrange) > 0):
+					b.currentattack = b.attacksinrange[0] # use choice
+					b.currentbehavior = 'attack'
+					megabrain.currentattacking += 1
+					if (megabrain.currentattacking >= megabrain.maxattacking):
+						break
 				
 	megabrain_updatetimer(megabrain)
 
 class Brain:
 	def __init__(self, entity):
 		self.entity = entity
-		self.attacking = False # set by megabrain
+		self.attacks = []
+		self.attacksinrange = [] # maybe just a bool array referencing attacks? Can be optimized
+		self.currentattack = None # set by megabrain
 		self.movetarget = None # set by megabrain
 		self.currentbehavior = 'idle'
 		self.timer = 0
@@ -363,9 +378,17 @@ def behavior_threaten_update(b, geomap, player, mb, player_detected):
 		# update path finding, set b.movetarget
 		b.movetarget = player.p
 
-def behavior_attack_update(b, geomap, player, mb, player_detected):
+	# build in-range attacks list/bool array??
+	b.attacksinrange.clear()
+	if (player_detected):
+		for atk in b.attacks:
+			if (distance_less_than(player.p, b.entity.p, atk)):
+				b.attacksinrange.append(atk)
+
+def behavior_attack_update(b, geomap, player, mb):
 	# assume entity has enemytype
 	assert(brain.entity.enemytype != None)
+	# if done attacking, change behavior to threaten and reduce mb.currentattacking by 1
 
 class Hurtbox:
 	def __init__(self, box, frames, direction, speed):
@@ -490,7 +513,7 @@ def player_dash(player):
 
 
 class Attack:
-	def __init__(self, startup, activeframes, cooldown, box, hurtframes=0, speed=0, nextatk=None):
+	def __init__(self, startup, activeframes, cooldown, box, rangeofatk, hurtframes=0, speed=0, nextatk=None):
 		self.actiontype = 'attack'
 		self.startup = startup # frames int
 		self.activeframes = activeframes # frames before entering cooldown
@@ -498,6 +521,8 @@ class Attack:
 		self.box = box # use hurtbox_get to create object
 		self.speed = speed # for moving hit boxes
 		self.nextatk = nextatk # auto-start this next if not None
+
+		self.range = rangeofatk
 
 		self.hurtframes = hurtframes # frames the hurtbox exists, default to activeframes
 		if (hurtframes == 0):
@@ -638,14 +663,14 @@ def main():
 	player.movebox = [(18, 0), (0, -18), (-18, 0), (0, 18)] 
 
 	player.jab = Attack(
-		1, 4, 20, 
+		1, 4, 20, 50,
 		[(22, 12), (48, 12), (48, -12), (22, -12)])
 	player.uppercut = Attack(
-		24, 6, 36,
+		24, 6, 36, 50, 
 		[(22, 12), (48, 12), (48, -12), (22, -12)])
 
 	player.jab_upgraded = Attack(
-		1, 4, 20, 
+		1, 4, 20, 150, 
 		[(22, 12), (48, 12), (48, -12), (22, -12)],
 		hurtframes=30, speed=8)
 
