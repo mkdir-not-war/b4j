@@ -224,12 +224,47 @@ def get_screen_coord(playerpos, playeroff, worldp):
 	return(playeroff[0]+diffx, playeroff[1]+diffy)
 
 class Entity:
-	def __init__(self, pos, direction=(0,1)):
+	def __init__(self, pos, direction=(0,1), enemytype=None):
 		self.p = pos[:]
+		self.dp = [0, 0]
 		self.direction = direction[:]
+
+		self.stuntimer = 0
+
 		self.hitbox = None
 		self.brain = None
-		self.enemytype = None
+		self.enemytype = enemytype
+
+		self.DESTROY = False
+
+		self.hp = 1
+		self.weight = 2
+		self.poise = 0
+
+		if (enemytype != None):
+			self.hp = enemytype.maxhp
+			self.weight = enemytype.weight
+			self.poise = enemytype.poise
+
+WEIGHT_FRAME_MULT = 10
+
+def entity_hurt(entity, hurtbox, megabrain):
+	entity.hp -= 1
+	if (entity.hp <= 0):
+		entity.DESTROY = True
+		if (entity.brain != None):
+			megabrain_removebrain(megabrain, entity.brain)
+
+	direction = hurtbox.direction
+	if (hurtbox.attack.force > entity.poise):
+		entity.stuntimer = entity.weight * WEIGHT_FRAME_MULT
+		entity.dp = direction[:]
+		if (entity.brain != None and entity.brain.currentbehavior == 'attack'):
+			entity.brain.attackstate = None
+			entity.brain.currentattack = None
+			entity.brain.currentbehavior = 'threaten'
+			entity.brain.actionframe = entity.enemytype.timebetweenattacks
+			megabrain.currentattacking -= 1
 
 def entity_get_hitbox(entity):
 	return [(x+entity.p[0], y+entity.p[1]) for (x, y) in entity.hitbox]
@@ -241,23 +276,39 @@ def entity_update_brain(entity):
 '''
 
 def entity_update_physics(entity):
-	if (entity.enemytype == None or entity.brain == None):
-		return
-	speed = entity.enemytype.speed
-	movetarget = entity.brain.movetarget
-	if (movetarget != None):
-		entity.direction = normalize((
-			movetarget[0]-entity.p[0], 
-			movetarget[1]-entity.p[1]))
-		if (speed > 0):
-			new_p = (
-				entity.p[0] + entity.direction[0] * speed,
-				entity.p[1] + entity.direction[1] * speed)
-			if not distance_less_than(new_p, movetarget, tilewidth):
-				entity.p = new_p
+	# decrement stun timer if needed
+	if (entity.stuntimer > 0):
+		entity.stuntimer -= 1
+
+	speed = 0
+	# move facing direction to movetarget, set speed if far enough away
+	if (entity.enemytype != None and entity.brain != None):
+		movetarget = entity.brain.movetarget
+		if (movetarget != None):
+			entity.direction = normalize((
+				movetarget[0]-entity.p[0], 
+				movetarget[1]-entity.p[1]))	
+			if distance_less_than(entity.p, movetarget, tilewidth):
+				speed = entity.enemytype.speed
+
+	# if not stunned, delta-position is set to direction
+	if (entity.stuntimer <= 0):
+		entity.dp[0] = entity.direction[0]
+		entity.dp[1] = entity.direction[1]
+
+	# if this entity is the type that moves at all, move in delta-position
+	# >> entities with speed=0 won't move back when stunned <<
+	if (speed > 0):
+		new_p = (
+			entity.p[0] + entity.dp[0] * speed,
+			entity.p[1] + entity.dp[1] * speed)
+		entity.p = new_p
+
+	# refresh velocity vector
+	entity.dp = [0, 0]
 
 class EnemyType:
-	def __init__(self, name, dr, ib, t2f, speed=0, timebetweenattacks=60):
+	def __init__(self, name, dr, ib, t2f, maxhp=1, poise=0, weight=1, speed=0, timebetweenattacks=60):
 		self.name = name
 		self.attacks = []
 		self.timebetweenattacks = timebetweenattacks
@@ -266,23 +317,32 @@ class EnemyType:
 		self.initialbehavior = ib # read by megabrain
 		self.time2forget = int(t2f*30) # time in seconds that this enemy will search for player
 		self.speed = speed
+		self.maxhp = maxhp
+		self.poise = poise # use to determine if stunned or not from attack
+		self.weight = weight # use to determine how long stunned
 		self.patrolnodes = []
 
-et_basiccreature = EnemyType('basic creature', 5, 'idle', 6, speed=1)
+et_basiccreature = EnemyType('basic creature', 5, 'idle', 6, maxhp=3, speed=1)
 
 # megabrain handles coordination between multiple hostile enemy AIs
 class MegaBrain:
-	def __init__(self, entities):
+	def __init__(self):
 		self.maxtime = 10
 		self.timer = self.maxtime
 		self.maxattacking = 3
 		self.currentattacking = 0
-		self.brains = [e.brain for e in entities if e.brain != None and e.enemytype != None]
+		self.brains = []
 
 def brain_updatetimer(brain):
 	brain.timer -= 1
 	if (brain.timer <= 0):
 		brain.timer = brain.maxtime
+
+def megabrain_addbrain(megabrain, brain):
+	megabrain.brains.append(brain)
+
+def megabrain_removebrain(megabrain, brain):
+	megabrain.brains.remove(brain)
 
 stufftodraw = [] ############################################### debug art #######################
 
@@ -320,13 +380,13 @@ def megabrain_update(megabrain, geomap, hurtboxes, player, screen):
 
 
 		if b.currentbehavior == 'idle':
-			behavior_idle_update(b, geomap, player_detected)
+			brain_idle_update(b, geomap, player_detected)
 		elif b.currentbehavior == 'patrol':
-			behavior_patrol_update(b, geomap, player_detected)
+			brain_patrol_update(b, geomap, player_detected)
 		elif b.currentbehavior == 'threaten':
-			behavior_threaten_update(b, geomap, player, megabrain, player_detected)
+			brain_threaten_update(b, geomap, player, megabrain, player_detected)
 		elif b.currentbehavior == 'attack':
-			behavior_attack_update(b, geomap, player, megabrain, hurtboxes)
+			brain_attack_update(b, geomap, player, megabrain, hurtboxes)
 
 	# pick attackers
 	if (megabrain.currentattacking < megabrain.maxattacking):
@@ -364,13 +424,13 @@ class Brain:
 		if (entity.enemytype != None):
 			self.currentbehavior = entity.enemytype.initialbehavior
 
-def behavior_idle_update(b, geomap, player_detected):
+def brain_idle_update(b, geomap, player_detected):
 	if (player_detected):
 		print('threaten!')
 		b.currentbehavior = 'threaten'
 		b.actionframe = b.entity.enemytype.timebetweenattacks
 
-def behavior_patrol_update(b, geomap, player_detected):
+def brain_patrol_update(b, geomap, player_detected):
 	if (player_detected):
 		print('threaten!')
 		b.currentbehavior = 'threaten'
@@ -383,7 +443,7 @@ def behavior_patrol_update(b, geomap, player_detected):
 		b.movetarget = b.enemytype.patrolnodes[-b.patrolnodeindex] # use negative index in python
 		# in C#, keep track of legnth of array and just iterate forwards instead of backwards
 
-def behavior_threaten_update(b, geomap, player, mb, player_detected):
+def brain_threaten_update(b, geomap, player, mb, player_detected):
 	if mb.timer == 1:
 		# update path finding, set b.movetarget
 		b.movetarget = player.p
@@ -399,7 +459,7 @@ def behavior_threaten_update(b, geomap, player, mb, player_detected):
 			if (distance_less_than(player.p, b.entity.p, atk.range)):
 				b.attacksinrange.append(atk)
 
-def behavior_attack_update(b, geomap, player, mb, hurtboxes):
+def brain_attack_update(b, geomap, player, mb, hurtboxes):
 	# assume entity has enemytype
 	assert(b.entity.enemytype != None)
 
@@ -419,8 +479,7 @@ def behavior_attack_update(b, geomap, player, mb, hurtboxes):
 					hurtbox, 
 					e.direction, 
 					e.p, 
-					atk.hurtframes,
-					atk.speed))
+					atk))
 			elif b.attackstate == 'active':
 				b.attackstate = 'cooldown'
 				b.actionframe = atk.cooldown
@@ -441,17 +500,18 @@ def behavior_attack_update(b, geomap, player, mb, hurtboxes):
 				continueprocessing = False
 
 class Hurtbox:
-	def __init__(self, box, frames, direction, speed):
+	def __init__(self, box, direction, attack):
+		self.attack = attack
 		self.box = box[:]
-		self.framesleft = frames
+		self.framesleft = attack.hurtframes
 		self.direction = direction
-		self.speed = speed
+		self.speed = attack.speed
 		self.destroy = False
 
-def hurtbox_get(box, direction, position, frames, speed):
+def hurtbox_get(box, direction, position, attack):
 	hb = get_rotated_vecs(direction, box)
 	hb = [(x+position[0], y+position[1]) for (x, y) in hb]
-	return Hurtbox(hb, frames, direction, speed)
+	return Hurtbox(hb, direction, attack)
 
 def hurtbox_update(hurtbox, geomap):
 	# fixed time step, no need for delta time
@@ -501,6 +561,12 @@ class Player:
 		self.actionframe = 0
 		self.currentaction = noneaction
 
+		self.maxhp = 5
+		self.hp = self.maxhp
+
+		self.maxstam = 5
+		self.stam = self.maxstam
+
 		self.jab = None
 		self.uppercut = None
 		self.jab_projectile = None
@@ -532,8 +598,7 @@ def player_update(player, hurtboxes):
 						hurtbox, 
 						player.dir, 
 						player.p, 
-						player.currentaction.hurtframes,
-						player.currentaction.speed))
+						player.currentaction))
 				elif player.state == 'active':
 					player.state = 'cooldown'
 					player.actionframe = player.currentaction.cooldown
@@ -554,6 +619,14 @@ def player_attack(player, attack):
 	player.currentaction = attack
 	player.actionframe = attack.startup
 
+def player_hurt(player, attack):
+	player.hp -= 1
+	if player.hp <= 0:
+		pass
+		# dead
+	# set effects like burning etc.
+	# push back??
+
 def player_dash(player):
 	if (player.state == 'idle' or 
 		(player.currentaction.actiontype == 'dash' and player.state == 'chainable')):
@@ -563,7 +636,9 @@ def player_dash(player):
 
 
 class Attack:
-	def __init__(self, startup, activeframes, cooldown, box, rangeofatk=0, hurtframes=0, speed=0, nextatk=None):
+	def __init__(self, startup, activeframes, cooldown, box, 
+		force=1, rangeofatk=0, hurtframes=0, speed=0, nextatk=None):
+
 		self.actiontype = 'attack'
 		self.startup = startup # frames int
 		self.activeframes = activeframes # frames before entering cooldown
@@ -573,6 +648,7 @@ class Attack:
 		self.nextatk = nextatk # auto-start this next if not None
 
 		self.range = rangeofatk
+		self.force = force
 
 		self.hurtframes = hurtframes # frames the hurtbox exists, default to activeframes
 		if (hurtframes == 0):
@@ -702,24 +778,24 @@ def main():
 		[(22, 12), (48, 12), (48, -12), (22, -12)],
 		rangeofatk=200, hurtframes=30, speed=8)
 
+	# start up mega brain
+	megabrain = MegaBrain()
+
 	# throw in a couple baddies
-	baddy1 = Entity([300, 150])
+	baddy1 = Entity([300, 150], enemytype=et_basiccreature)
 	baddy1.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
-	baddy1.enemytype = et_basiccreature
 	entities.append(baddy1)
 	baddy1.brain = Brain(baddy1)
 	baddy1.brain.attacks.append(jab)
 	baddy1.brain.attacks.append(uppercut)
+	megabrain_addbrain(megabrain, baddy1.brain)
 
-	baddy2 = Entity([600, 500])
+	baddy2 = Entity([600, 500], enemytype=et_basiccreature)
 	baddy2.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
-	baddy2.enemytype = et_basiccreature
 	entities.append(baddy2)
 	baddy2.brain = Brain(baddy2)
-	baddy2.brain.attacks.append(jab_ranged)
-
-	# start up mega brain
-	megabrain = MegaBrain(entities)
+	baddy2.brain.attacks.append(jab_ranged)	
+	megabrain_addbrain(megabrain, baddy2.brain)
 
 	# player stuff
 	playeroffset = midscreen
@@ -896,6 +972,13 @@ def main():
 				player.p = new_p
 
 		# calculate hurtboxes with enemies
+		for h in hurtboxes:
+			for e in entities:
+				# only enemies can be hurt by hitboxes, no NPCs
+				if (e.enemytype != None):
+					if poly_collides(h.box, entity_get_hitbox(e)):
+						entity_hurt(e, h, megabrain)
+						h.destroy = True
 
 		# clean hurtboxes
 		for h in hurtboxes:
@@ -915,6 +998,8 @@ def main():
 		for e in entities:
 			#entity_update_brain(e)
 			entity_update_physics(e)
+		# clean up entities
+		entities = [e for e in entities if not e.DESTROY]
 
 		# draw
 		screen.fill(grey)
