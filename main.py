@@ -257,9 +257,10 @@ def entity_update_physics(entity):
 				entity.p = new_p
 
 class EnemyType:
-	def __init__(self, name, dr, ib, t2f, speed=0):
+	def __init__(self, name, dr, ib, t2f, speed=0, timebetweenattacks=60):
 		self.name = name
 		self.attacks = []
+		self.timebetweenattacks = timebetweenattacks
 		# attack objects, hp and range at which to use them
 		self.detectionradius = dr # read by megabrain
 		self.initialbehavior = ib # read by megabrain
@@ -267,7 +268,7 @@ class EnemyType:
 		self.speed = speed
 		self.patrolnodes = []
 
-et_basiccreature = EnemyType('basic creature', 5, 'idle', 6)
+et_basiccreature = EnemyType('basic creature', 5, 'idle', 6, speed=1)
 
 # megabrain handles coordination between multiple hostile enemy AIs
 class MegaBrain:
@@ -278,14 +279,14 @@ class MegaBrain:
 		self.currentattacking = 0
 		self.brains = [e.brain for e in entities if e.brain != None and e.enemytype != None]
 
-def megabrain_updatetimer(megabrain):
-	megabrain.timer -= 1
-	if (megabrain.timer <= 0):
-		megabrain.timer = megabrain.maxtime
+def brain_updatetimer(brain):
+	brain.timer -= 1
+	if (brain.timer <= 0):
+		brain.timer = brain.maxtime
 
 stufftodraw = [] ############################################### debug art #######################
 
-def megabrain_update(megabrain, geomap, player, screen):
+def megabrain_update(megabrain, geomap, hurtboxes, player, screen):
 	global stufftodraw
 	stufftodraw.clear()
 
@@ -325,34 +326,40 @@ def megabrain_update(megabrain, geomap, player, screen):
 		elif b.currentbehavior == 'threaten':
 			behavior_threaten_update(b, geomap, player, megabrain, player_detected)
 		elif b.currentbehavior == 'attack':
-			behavior_attack_update(b, geomap, player, megabrain)
+			behavior_attack_update(b, geomap, player, megabrain, hurtboxes)
 
 	# pick attackers
 	if (megabrain.currentattacking < megabrain.maxattacking):
 		# shuffle the brains, maybe divide spacially so that more likely to have attacks from
 		# mutliple directions instead of only just one direction?? Need to test for feel.
 		for b in megabrain.brains:
-			if b.currentbehavior == 'threaten':
+			if (b.currentbehavior == 'threaten' and b.actionframe <= 0):
 				if (len(b.attacksinrange) > 0):
 					b.currentattack = b.attacksinrange[0] # use choice
 					b.currentbehavior = 'attack'
+					b.attackstate = 'startup'
+					b.actionframe = b.currentattack.startup
 					megabrain.currentattacking += 1
 					if (megabrain.currentattacking >= megabrain.maxattacking):
 						break
 				
-	megabrain_updatetimer(megabrain)
+	brain_updatetimer(megabrain)
 
 class Brain:
 	def __init__(self, entity):
 		self.entity = entity
 		self.attacks = []
 		self.attacksinrange = [] # maybe just a bool array referencing attacks? Can be optimized
+
 		self.currentattack = None # set by megabrain
+		self.attackstate = None
+		self.actionframe = 0
+
 		self.movetarget = None # set by megabrain
 		self.currentbehavior = 'idle'
-		self.timer = 0
 		self.timesincedetection = 0
-		self.patrolnodeindex = 0
+
+		self.patrolnodeindex = 0 # are we even going to use patrols?
 
 		if (entity.enemytype != None):
 			self.currentbehavior = entity.enemytype.initialbehavior
@@ -361,34 +368,77 @@ def behavior_idle_update(b, geomap, player_detected):
 	if (player_detected):
 		print('threaten!')
 		b.currentbehavior = 'threaten'
+		b.actionframe = b.entity.enemytype.timebetweenattacks
 
 def behavior_patrol_update(b, geomap, player_detected):
 	if (player_detected):
 		print('threaten!')
 		b.currentbehavior = 'threaten'
+		b.actionframe = b.entity.enemytype.timebetweenattacks
 	# assumes nodes are always reachable directly from previous nodes, no collision
 	elif (get_tile_pos(b.entity.p) == get_tile_pos(b.movetarget)):
 		b.patrolnodeindex -= 1
 		if (b.patrolnodeindex < 0):
 			b.patrolnodeindex = len(b.enemytype.patrolnodes)
-		b.movetarget = b.enemytype.patrolnodes[b.patrolnodeindex]
+		b.movetarget = b.enemytype.patrolnodes[-b.patrolnodeindex] # use negative index in python
+		# in C#, keep track of legnth of array and just iterate forwards instead of backwards
 
 def behavior_threaten_update(b, geomap, player, mb, player_detected):
 	if mb.timer == 1:
 		# update path finding, set b.movetarget
 		b.movetarget = player.p
 
+	# update action timer
+	if (b.actionframe > 0):
+		b.actionframe -= 1
+
 	# build in-range attacks list/bool array??
 	b.attacksinrange.clear()
 	if (player_detected):
 		for atk in b.attacks:
-			if (distance_less_than(player.p, b.entity.p, atk)):
+			if (distance_less_than(player.p, b.entity.p, atk.range)):
 				b.attacksinrange.append(atk)
 
-def behavior_attack_update(b, geomap, player, mb):
+def behavior_attack_update(b, geomap, player, mb, hurtboxes):
 	# assume entity has enemytype
-	assert(brain.entity.enemytype != None)
-	# if done attacking, change behavior to threaten and reduce mb.currentattacking by 1
+	assert(b.entity.enemytype != None)
+
+	if (b.actionframe > 0):
+		b.actionframe -= 1
+	if (b.actionframe <= 0):
+		e = b.entity
+		atk = b.currentattack
+		# if done attacking, change behavior to threaten and reduce mb.currentattacking by 1
+		continueprocessing = True
+		while (continueprocessing):
+			if b.attackstate == 'startup':
+				b.attackstate = 'active'
+				b.actionframe = atk.activeframes
+				hurtbox = [p for p in atk.box]
+				hurtboxes.append(hurtbox_get(
+					hurtbox, 
+					e.direction, 
+					e.p, 
+					atk.hurtframes,
+					atk.speed))
+			elif b.attackstate == 'active':
+				b.attackstate = 'cooldown'
+				b.actionframe = atk.cooldown
+			elif b.attackstate == 'cooldown':
+				if (not atk.nextatk == None):
+					b.attackstate = 'startup'
+					b.currentattack = atk.nextatk
+					b.actionframe = atk.nextatk.startup
+				else:
+					b.attackstate = None
+					b.currentattack = None
+					b.currentbehavior = 'threaten'
+					b.actionframe = b.entity.enemytype.timebetweenattacks
+					mb.currentattacking -= 1
+
+			# use this for chaining attacks (e.g. jab -> projectile)
+			if (b.actionframe > 0 or b.attackstate == None):
+				continueprocessing = False
 
 class Hurtbox:
 	def __init__(self, box, frames, direction, speed):
@@ -513,7 +563,7 @@ def player_dash(player):
 
 
 class Attack:
-	def __init__(self, startup, activeframes, cooldown, box, rangeofatk, hurtframes=0, speed=0, nextatk=None):
+	def __init__(self, startup, activeframes, cooldown, box, rangeofatk=0, hurtframes=0, speed=0, nextatk=None):
 		self.actiontype = 'attack'
 		self.startup = startup # frames int
 		self.activeframes = activeframes # frames before entering cooldown
@@ -637,18 +687,36 @@ def main():
 
 	geomap = GeoMap((20, 20), tilemap)
 
+	# set up attacks
+	jab = Attack(
+		1, 4, 20, 
+		[(22, 12), (48, 12), (48, -12), (22, -12)],
+		rangeofatk=80)
+	uppercut = Attack(
+		24, 6, 36,
+		[(22, 12), (48, 12), (48, -12), (22, -12)],
+		rangeofatk=80)
+
+	jab_ranged = Attack(
+		1, 4, 20,
+		[(22, 12), (48, 12), (48, -12), (22, -12)],
+		rangeofatk=200, hurtframes=30, speed=8)
+
 	# throw in a couple baddies
 	baddy1 = Entity([300, 150])
 	baddy1.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
 	baddy1.enemytype = et_basiccreature
 	entities.append(baddy1)
 	baddy1.brain = Brain(baddy1)
+	baddy1.brain.attacks.append(jab)
+	baddy1.brain.attacks.append(uppercut)
 
 	baddy2 = Entity([600, 500])
 	baddy2.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
 	baddy2.enemytype = et_basiccreature
 	entities.append(baddy2)
 	baddy2.brain = Brain(baddy2)
+	baddy2.brain.attacks.append(jab_ranged)
 
 	# start up mega brain
 	megabrain = MegaBrain(entities)
@@ -662,17 +730,9 @@ def main():
 	# offset from player pos, as a factor of size
 	player.movebox = [(18, 0), (0, -18), (-18, 0), (0, 18)] 
 
-	player.jab = Attack(
-		1, 4, 20, 50,
-		[(22, 12), (48, 12), (48, -12), (22, -12)])
-	player.uppercut = Attack(
-		24, 6, 36, 50, 
-		[(22, 12), (48, 12), (48, -12), (22, -12)])
-
-	player.jab_upgraded = Attack(
-		1, 4, 20, 150, 
-		[(22, 12), (48, 12), (48, -12), (22, -12)],
-		hurtframes=30, speed=8)
+	player.jab = jab
+	player.uppercut = uppercut
+	player.jab_upgraded = jab_ranged
 
 
 	prev_input = []
@@ -850,7 +910,7 @@ def main():
 		# update logic based on collision and input
 		player_update(player, hurtboxes)
 
-		megabrain_update(megabrain, geomap, player, screen)
+		megabrain_update(megabrain, geomap, hurtboxes, player, screen)
 
 		for e in entities:
 			#entity_update_brain(e)
