@@ -38,6 +38,12 @@ def insertnode(node, val, list):
 	index = i
 	list.insert(index, (node, val))
 
+def grid_print(grid, dimensions, func):
+	width, height = dimensions
+	for j in range(height):
+		print(''.join([func(x) for x in grid[(width*j):(width*(j+1))]]))
+	print()
+
 # define floodfill arrays out of scope in C# so it doesn't call GC a ton
 def floodfill(geomap, *pos, dist=None):
 	height, width = geomap.height, geomap.width
@@ -327,7 +333,7 @@ class EnemyType:
 		self.weight = weight # use to determine how long stunned
 		self.patrolnodes = []
 
-et_basiccreature = EnemyType('basic creature', 5, 'idle', 6, maxhp=3, speed=1)
+et_basiccreature = EnemyType('basic creature', 5, 'idle', 6, maxhp=3, speed=0)
 
 # megabrain handles coordination between multiple hostile enemy AIs
 class MegaBrain:
@@ -687,7 +693,7 @@ def geomap_getadjacent(geolist, width, height, pos, diagonal=False):
 	return result
 
 # NOTE: assumes tile-position of entity is bottom-left corner.
-def geomap_get2widemap(geomap):
+def geomap_getwidemap(geomap, minpassagewidth):
 	width, height = geomap.width, geomap.height
 	prevgen = geomap.geo[:]
 
@@ -700,23 +706,28 @@ def geomap_get2widemap(geomap):
 
 	newgeo = prevgen[:]
 
-	# grow on the left and bottom side of walls
-	for j in range(1, height-1):
-		for i in range(1, width-1):
-			if (prevgen[width * j + i] == False):
-				if (prevgen[width * j + (i+1)]):
-					newgeo[width * j + i] = True
-				if (prevgen[width * (j-1) + i]):
-					newgeo[width * j + i] = True
-					newgeo[width * j + (i-1)] = True
+	for gen in range(minpassagewidth-1):
+		# grow on the left and bottom side of walls
+		for j in range(1, height-1):
+			for i in range(1, width-1):
+				if (prevgen[width * j + i] == False):
+					if (prevgen[width * j + (i+1)]):
+						newgeo[width * j + i] = True
+					if (prevgen[width * (j-1) + i]):
+						for k in range(minpassagewidth):
+							newgeo[width * j + (i-k)] = True
+		prevgen = newgeo[:]
 
 	# DEBUG ###########
 	'''
-	for j in range(height):
-		print(''.join(['# ' if x else '. ' for x in geomap.geo[(width*j):(width*(j+1))]]))
+	def func(x):
+		return '# ' if x else '. '
+	print('~~ geomap with minimum passage width: %d ' % minpassagewidth + '~'*20)
 	print()
-	for j in range(height):
-		print(''.join(['# ' if x else '. ' for x in newgeo[(width*j):(width*(j+1))]]))
+	grid_print(geomap.geo, (width, height), func)
+	grid_print(newgeo, (width, height), func)
+	print('~'*60)
+	print()
 	'''
 	###################
 
@@ -748,16 +759,29 @@ neighedgedict[SE] = [S, E]
 neighedgedict[SW] = [S, W]
 #########################################################
 
+# NOTE: pathing maps works best with structures (contiguous walls) that DON'T intersect the perimeter
 def geomap_getpathingmap(geomap):
 	width, height = geomap.width, geomap.height
-	gens = 20
+	gens = 12
+
 	pathcost = 1
 	nonwallcost = 10
+	wallcost = width*height
 
-	prevgen = [pathcost if not val else width*height for val in geomap.geo]
+	prevgen = []
+	for j in range(height):
+		for i in range(width):
+			if (i == 0 or j == 0 or
+				i == width-1 or j == height-1):
+				prevgen.append(wallcost)
+			elif (geomap.geo[width * j + i] == True):
+				prevgen.append(wallcost)
+			else:
+				prevgen.append(pathcost)
+
 	result = prevgen[:]
 
-	# includes passages off the map!
+	# don't include passages off the map (wouldn't make a difference though)
 	for gen in range(gens):
 		for j in range(1, height-1):
 			for i in range(1, width-1):
@@ -818,14 +842,14 @@ def geomap_getpathingmap(geomap):
 		prevgen = result[:]		
 
 	# DEBUG ###########
-	'''
-	for j in range(height):
-		print(''.join(['# ' if x else '. ' for x in geomap.geo[(width*j):(width*(j+1))]]))
-	print()
-	for j in range(height):
-		print(''.join(['. ' if x==1 else 'x ' if x<100 else '# ' for x in result[(width*j):(width*(j+1))]]))
-	print()
-	'''
+	
+	def func(x):
+		return '# ' if x else '. '
+	def func2(x):
+		return '. ' if x==1 else 'x ' if x<100 else '# '
+	grid_print(geomap.geo, (width, height), func)
+	grid_print(result, (width, height), func2)
+	
 	###################
 
 	return result
@@ -881,6 +905,29 @@ def get_world_pos(tilepos):
 	result = (tx*tilewidth, ty*tilewidth)
 	return result
 
+def tilemap_load(filepath):
+	result = []
+	width = 0
+	height = 0
+
+	f = open(filepath, 'r')
+	for line in f:
+		spline = line.strip('\n')
+		width = len(spline)
+		for char in spline:
+			if (char == '#'):
+				result.append(True)
+			elif (char == '.'):
+				result.append(False)
+		height += 1
+	f.close()
+
+	def func(x):
+		return '# ' if x else '. '
+	#grid_print(result, (width, height), func)
+
+	return (width, height), result
+
 def main():
 	pygame.init()
 
@@ -907,30 +954,11 @@ def main():
 	entities = []
 	hurtboxes = []
 
-	tilemap = \
-		[True]*15 + [False] + [True]*4 + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*4 + [True] + [False]*2 + [True] + [False]*10 + [True] + \
-		[True] + [False]*4 + [True]*2 + [False]*12 + [True] + \
-		[True] + [False]*6 + [True] + [False]*11 + [True] + \
-		[True] + [False]*4 + [True] + [False] + [False] + [False]*11 + [True] + \
-		[False] + [False]*4 + [True] + [False] + [True] + [False]*11 + [True] + \
-		[True] + [False]*5 + [True] + [False]*12 + [True] + \
-		[True] + [False]*4 + [True]*6 + [False]*8 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*4 + [True]*7 + [False]*7 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*4 + [True]*7 + [False]*7 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True]*20
+	dimensions, tilemap = tilemap_load('./smallmap.txt')
 
-	geomap = GeoMap((20, 20), tilemap)
-	geomap_wide = geomap_get2widemap(geomap)
+	geomap = GeoMap(dimensions, tilemap)
+	geomap_2wide = geomap_getwidemap(geomap, 2)
+	geomap_3wide = geomap_getwidemap(geomap, 3)
 
 	# set up attacks
 	jab = Attack(
@@ -951,7 +979,7 @@ def main():
 	megabrain = MegaBrain()
 
 	# throw in a couple baddies
-	baddy1 = Entity([300, 150], enemytype=et_basiccreature)
+	baddy1 = Entity(get_world_pos((10, 6)), enemytype=et_basiccreature)
 	baddy1.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
 	entities.append(baddy1)
 	baddy1.brain = Brain(baddy1)
@@ -959,7 +987,7 @@ def main():
 	baddy1.brain.attacks.append(uppercut)
 	megabrain_addbrain(megabrain, baddy1.brain)
 
-	baddy2 = Entity([600, 500], enemytype=et_basiccreature)
+	baddy2 = Entity(get_world_pos((15, 9)), enemytype=et_basiccreature)
 	baddy2.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
 	entities.append(baddy2)
 	baddy2.brain = Brain(baddy2)
