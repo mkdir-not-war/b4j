@@ -5,6 +5,10 @@ def dot(v1, v2):
 	result = v1[0]*v2[0] + v1[1]*v2[1]
 	return result
 
+def v2_add(v1, v2):
+	result = (v1[0]+v2[0], v1[1]+v2[1])
+	return result
+
 def length(v):
 	result = sqrt(v[0]**2 + v[1]**2)
 	return result
@@ -308,7 +312,7 @@ def entity_update_physics(entity):
 	entity.dp = [0, 0]
 
 class EnemyType:
-	def __init__(self, name, dr, ib, t2f, maxhp=1, poise=0, weight=1, speed=0, timebetweenattacks=60):
+	def __init__(self, name, dr, ib, t2f, widthintiles=1, maxhp=1, poise=0, weight=1, speed=0, timebetweenattacks=60):
 		self.name = name
 		self.attacks = []
 		self.timebetweenattacks = timebetweenattacks
@@ -317,6 +321,7 @@ class EnemyType:
 		self.initialbehavior = ib # read by megabrain
 		self.time2forget = int(t2f*30) # time in seconds that this enemy will search for player
 		self.speed = speed
+		self.width = widthintiles
 		self.maxhp = maxhp
 		self.poise = poise # use to determine if stunned or not from attack
 		self.weight = weight # use to determine how long stunned
@@ -658,14 +663,14 @@ class GeoMap:
 	def __init__(self, dimensions, geo):
 		self.width, self.height = dimensions
 		self.geo = geo # bool map of collidable geometry, width 1
-		self.geo_w2 = geomap_buildwidemap(self, 2)
+		self.costmap = geomap_getpathingmap(self)
 
 def geomap_iscollision(geomap, pos):
 	result = geomap.geo[geomap.width * pos[1] + pos[0]]
 	return result
 
 def geomap_getadjacent(geolist, width, height, pos, diagonal=False):
-	result = []
+	result = {}
 	for j in range(-1, 2):
 		for i in range(-1, 2):
 			if (i == 0 and j == 0):
@@ -678,36 +683,132 @@ def geomap_getadjacent(geolist, width, height, pos, diagonal=False):
 					adjpos[1] >= 0 and
 					adjpos[1] < height):
 
-					result.append((adjpos, geolist[width * adjpos[1] + adjpos[0]]))
+					result[adjpos] = geolist[width * adjpos[1] + adjpos[0]]
 	return result
 
 # NOTE: assumes tile-position of entity is bottom-left corner.
-def geomap_buildwidemap(geomap, mincorridorwidth):
+def geomap_get2widemap(geomap):
 	width, height = geomap.width, geomap.height
 	prevgen = geomap.geo[:]
 
+	# fill in passages off the map
+	for j in range(height):
+		for i in range(width):
+			if (i == 0 or j == 0 or
+				i == width-1 or j == height-1):
+				prevgen[width * j + i] = True
+
+	newgeo = prevgen[:]
+
+	# grow on the left and bottom side of walls
+	for j in range(1, height-1):
+		for i in range(1, width-1):
+			if (prevgen[width * j + i] == False):
+				if (prevgen[width * j + (i+1)]):
+					newgeo[width * j + i] = True
+				if (prevgen[width * (j-1) + i]):
+					newgeo[width * j + i] = True
+					newgeo[width * j + (i-1)] = True
+
+	# DEBUG ###########
+	'''
+	for j in range(height):
+		print(''.join(['# ' if x else '. ' for x in geomap.geo[(width*j):(width*(j+1))]]))
+	print()
+	for j in range(height):
+		print(''.join(['# ' if x else '. ' for x in newgeo[(width*j):(width*(j+1))]]))
+	'''
+	###################
+
+	result = GeoMap((width, height), newgeo)
+	return result
+
+# DIRECTION STUFF FOR PATHFINDING ########################
+N = (0, -1)
+S = (0, 1)
+E = (1, 0)
+W = (-1, 0)
+NE = (1, -1)
+NW = (-1, -1)
+SE = (1, 1)
+SW = (-1, 1)
+
+carddirs = [N, S, E, W]
+
+oppcornerdict = {}
+oppcornerdict[N] = [SE, SW]
+oppcornerdict[S] = [NE, NW]
+oppcornerdict[E] = [NW, SW]
+oppcornerdict[W] = [SE, NE]
+
+neighedgedict = {}
+neighedgedict[NE] = [N, E]
+neighedgedict[NW] = [N, W]
+neighedgedict[SE] = [S, E]
+neighedgedict[SW] = [S, W]
+#########################################################
+
+def geomap_getpathingmap(geomap):
+	width, height = geomap.width, geomap.height
+	gens = 1
+	pathcost = 1
+	nonwallcost = 10
+
+	prevgen = [pathcost if not val else width*height for val in geomap.geo]
 	result = prevgen[:]
-	for gen in range(mincorridorwidth-1):
-		# ignore passages off the map
+
+	# includes passages off the map!
+	for gen in range(gens):
 		for j in range(1, height-1):
 			for i in range(1, width-1):
-				if (prevgen[width * j + i] == False):
-					# grow on the left and bottom side of walls
-					if (prevgen[width * j + (i+1)]):
-						result[width * j + i] = True
-					if (prevgen[width * (j-1) + i]):
-						result[width * j + i] = True
-						result[width * j + (i-1)] = True
-					
-		# take snapshot of result and repeat steps with next generation	
-		prevgen = result[:]
+				# look at non-wall spots
+				if (prevgen[width * j + i] == pathcost):
+					adjposdict = geomap_getadjacent(prevgen, width, height, (i, j), diagonal=True)
+
+					cardwalls = [
+						adjposdict[v2_add((i, j), d)] for d in carddirs \
+						if adjposdict[v2_add((i, j), d)] > pathcost
+						]
+
+					if (len(cardwalls) >= 3):
+						result[width * j + i] = nonwallcost
+					else:
+						for d in carddirs:
+							# edge neighbor is a wall
+							if (adjposdict[v2_add((i, j), d)] > pathcost):
+								# grab opposite corners and neighbor edges
+								oppcorners = oppcornerdict[d]
+								neighedges = []
+								if (neighedgedict[oppcorners[0]][0] == neighedgedict[oppcorners[1]][0]):
+									# north or south matches, keep east and west
+									neighedges.append((oppcorners[0],
+										neighedgedict[oppcorners[0]][1]))
+									neighedges.append((oppcorners[1],
+										neighedgedict[oppcorners[0]][1]))
+								else:
+									# east or west matches, keep north and south
+									neighedges.append((oppcorners[0],
+										neighedgedict[oppcorners[0]][0]))
+									neighedges.append((oppcorners[1],
+										neighedgedict[oppcorners[0]][0]))
+
+								# if either opposite corner is a wall
+								for oc, edge in neighedges:
+									if (adjposdict[v2_add((i, j), oc)] > pathcost):
+										# and the corresponding neighbor edge is also a wall
+										if (adjposdict[v2_add((i, j), edge)] > pathcost):
+											result[width * j + i] = nonwallcost
+											break
+
+		prevgen = result[:]		
 
 	# DEBUG ###########
 	for j in range(height):
-		print(''.join([str('# ') if x else '. ' for x in geomap.geo[(width*j):(width*(j+1))]]))
+		print(''.join(['# ' if x else '. ' for x in geomap.geo[(width*j):(width*(j+1))]]))
 	print()
 	for j in range(height):
-		print(''.join([str('# ') if x else '. ' for x in result[(width*j):(width*(j+1))]]))
+		print(''.join(['. ' if x==1 else 'x ' if x<100 else '# ' for x in result[(width*j):(width*(j+1))]]))
+	print()
 	###################
 
 	return result
@@ -790,7 +891,7 @@ def main():
 	hurtboxes = []
 
 	tilemap = \
-		[True]*20 + \
+		[True]*15 + [False] + [True]*4 + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
@@ -799,19 +900,20 @@ def main():
 		[True] + [False]*4 + [True]*2 + [False]*12 + [True] + \
 		[True] + [False]*6 + [True] + [False]*11 + [True] + \
 		[True] + [False]*4 + [True] + [False] + [True] + [False]*11 + [True] + \
-		[True] + [False]*4 + [True] + [False] + [True] + [False]*11 + [True] + \
+		[False] + [False]*4 + [True] + [False] + [True] + [False]*11 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*4 + [True]*6 + [False]*8 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*4 + [True]*7 + [False]*7 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
-		[True] + [False]*4 + [True]*7 + [False]*7 + [True] + \
+		[True] + [False]*4 + [True]*7 + [False]*7 + [False] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True]*20
 
 	geomap = GeoMap((20, 20), tilemap)
+	#geomap_wide = geomap_get2widemap(geomap)
 
 	# set up attacks
 	jab = Attack(
