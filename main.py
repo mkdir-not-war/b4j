@@ -681,30 +681,24 @@ def geomap_getadjacent(geolist, width, height, pos, diagonal=False):
 					result.append((adjpos, geolist[width * adjpos[1] + adjpos[0]]))
 	return result
 
+# NOTE: assumes tile-position of entity is bottom-left corner.
 def geomap_buildwidemap(geomap, mincorridorwidth):
 	width, height = geomap.width, geomap.height
 	prevgen = geomap.geo[:]
 
 	result = prevgen[:]
 	for gen in range(mincorridorwidth-1):
-		for j in range(height):
-			for i in range(width):
+		# ignore passages off the map
+		for j in range(1, height-1):
+			for i in range(1, width-1):
 				if (prevgen[width * j + i] == False):
-					# seal corridors of width 1 per generation
-					adjwalls = [pos for pos, val in geomap_getadjacent(
-						prevgen, width, height, (i, j), diagonal=True) if val]
-						
-					if (len(adjwalls) >= 2):
-						startvec = (adjwalls[0][0]-i, adjwalls[0][1]-j)
-						for wi in range(1, len(adjwalls)):
-							wallpos = adjwalls[wi]
-							vec = (wallpos[0]-i, wallpos[1]-j)
-							# calc angle, if 90 degrees or farther, plug the hole
-							dotprod = dot(startvec, vec)
-							cosangle = dotprod/length(startvec)/length(vec)
-							if (cosangle < 0):
-								result[width * j + i] = True
-								break
+					# grow on the left and bottom side of walls
+					if (prevgen[width * j + (i+1)]):
+						result[width * j + i] = True
+					if (prevgen[width * (j-1) + i]):
+						result[width * j + i] = True
+						result[width * j + (i-1)] = True
+					
 		# take snapshot of result and repeat steps with next generation	
 		prevgen = result[:]
 
@@ -803,16 +797,16 @@ def main():
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*4 + [True] + [False]*2 + [True] + [False]*10 + [True] + \
 		[True] + [False]*4 + [True]*2 + [False]*12 + [True] + \
+		[True] + [False]*6 + [True] + [False]*11 + [True] + \
+		[True] + [False]*4 + [True] + [False] + [True] + [False]*11 + [True] + \
+		[True] + [False]*4 + [True] + [False] + [True] + [False]*11 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*4 + [True]*6 + [False]*8 + [True] + \
+		[True] + [False]*18 + [True] + \
+		[True] + [False]*4 + [True]*7 + [False]*7 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
-		[True] + [False]*18 + [True] + \
+		[True] + [False]*4 + [True]*7 + [False]*7 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True]*20
