@@ -657,11 +657,67 @@ class Attack:
 class GeoMap:
 	def __init__(self, dimensions, geo):
 		self.width, self.height = dimensions
-		self.geo = geo # bool map of collidable geometry
+		self.geo = geo # bool map of collidable geometry, width 1
+		self.geo_w2 = geomap_buildwidemap(self, 2)
 
 def geomap_iscollision(geomap, pos):
 	result = geomap.geo[geomap.width * pos[1] + pos[0]]
 	return result
+
+def geomap_getadjacent(geolist, width, height, pos, diagonal=False):
+	result = []
+	for j in range(-1, 2):
+		for i in range(-1, 2):
+			if (i == 0 and j == 0):
+				continue
+			if (diagonal or (i+j != 1 and i+j != -1)):
+				adjpos = (pos[0]+i, pos[1]+j)
+
+				if (adjpos[0] >= 0 and 
+					adjpos[0] < width and
+					adjpos[1] >= 0 and
+					adjpos[1] < height):
+
+					result.append((adjpos, geolist[width * adjpos[1] + adjpos[0]]))
+	return result
+
+def geomap_buildwidemap(geomap, mincorridorwidth):
+	width, height = geomap.width, geomap.height
+	prevgen = geomap.geo[:]
+
+	result = prevgen[:]
+	for gen in range(mincorridorwidth-1):
+		for j in range(height):
+			for i in range(width):
+				if (prevgen[width * j + i] == False):
+					# seal corridors of width 1 per generation
+					adjwalls = [pos for pos, val in geomap_getadjacent(
+						prevgen, width, height, (i, j), diagonal=True) if val]
+						
+					if (len(adjwalls) >= 2):
+						startvec = (adjwalls[0][0]-i, adjwalls[0][1]-j)
+						for wi in range(1, len(adjwalls)):
+							wallpos = adjwalls[wi]
+							vec = (wallpos[0]-i, wallpos[1]-j)
+							# calc angle, if 90 degrees or farther, plug the hole
+							dotprod = dot(startvec, vec)
+							cosangle = dotprod/length(startvec)/length(vec)
+							if (cosangle < 0):
+								result[width * j + i] = True
+								break
+		# take snapshot of result and repeat steps with next generation	
+		prevgen = result[:]
+
+	# DEBUG ###########
+	for j in range(height):
+		print(''.join([str('# ') if x else '. ' for x in geomap.geo[(width*j):(width*(j+1))]]))
+	print()
+	for j in range(height):
+		print(''.join([str('# ') if x else '. ' for x in result[(width*j):(width*(j+1))]]))
+	###################
+
+	return result
+
 
 # position is center of object, dimensions is (width, height)
 def geomap_gettilegeo_frompos(geomap, position, dimensions):
