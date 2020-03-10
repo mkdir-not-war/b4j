@@ -750,7 +750,7 @@ neighedgedict[SW] = [S, W]
 
 def geomap_getpathingmap(geomap):
 	width, height = geomap.width, geomap.height
-	gens = 1
+	gens = 20
 	pathcost = 1
 	nonwallcost = 10
 
@@ -780,35 +780,52 @@ def geomap_getpathingmap(geomap):
 								oppcorners = oppcornerdict[d]
 								neighedges = []
 								if (neighedgedict[oppcorners[0]][0] == neighedgedict[oppcorners[1]][0]):
-									# north or south matches, keep east and west
+									# north or south matches (first index), keep east and west
 									neighedges.append((oppcorners[0],
 										neighedgedict[oppcorners[0]][1]))
 									neighedges.append((oppcorners[1],
-										neighedgedict[oppcorners[0]][1]))
-								else:
-									# east or west matches, keep north and south
+										neighedgedict[oppcorners[1]][1]))
+								elif (neighedgedict[oppcorners[0]][1] == neighedgedict[oppcorners[1]][1]):
+									# east or west matches (second index), keep north and south
 									neighedges.append((oppcorners[0],
 										neighedgedict[oppcorners[0]][0]))
 									neighedges.append((oppcorners[1],
-										neighedgedict[oppcorners[0]][0]))
+										neighedgedict[oppcorners[1]][0]))
 
-								# if either opposite corner is a wall
-								for oc, edge in neighedges:
-									if (adjposdict[v2_add((i, j), oc)] > pathcost):
-										# and the corresponding neighbor edge is also a wall
-										if (adjposdict[v2_add((i, j), edge)] > pathcost):
+								# if first opposite corner is a wall
+								if (adjposdict[v2_add((i, j), neighedges[0][0])] > pathcost):
+									# and the corresponding neighbor edge is also a wall
+									if (adjposdict[v2_add((i, j), neighedges[0][1])] > pathcost):
+										# if the other opp corner exists, but no edge, then skip
+										if (adjposdict[v2_add((i, j), neighedges[1][0])] > pathcost and
+											adjposdict[v2_add((i, j), neighedges[1][1])] == pathcost):
+											pass
+										else:
+											result[width * j + i] = nonwallcost
+											break
+								# if second opposite corner is a wall
+								elif (adjposdict[v2_add((i, j), neighedges[1][0])] > pathcost):
+									# and the corresponding neighbor edge is also a wall
+									if (adjposdict[v2_add((i, j), neighedges[1][1])] > pathcost):
+										# if the other opp corner exists, but no edge, then skip
+										if (adjposdict[v2_add((i, j), neighedges[0][0])] > pathcost and
+											adjposdict[v2_add((i, j), neighedges[0][1])] == pathcost):
+											pass
+										else:
 											result[width * j + i] = nonwallcost
 											break
 
 		prevgen = result[:]		
 
 	# DEBUG ###########
+	'''
 	for j in range(height):
 		print(''.join(['# ' if x else '. ' for x in geomap.geo[(width*j):(width*(j+1))]]))
 	print()
 	for j in range(height):
 		print(''.join(['. ' if x==1 else 'x ' if x<100 else '# ' for x in result[(width*j):(width*(j+1))]]))
 	print()
+	'''
 	###################
 
 	return result
@@ -899,21 +916,21 @@ def main():
 		[True] + [False]*4 + [True] + [False]*2 + [True] + [False]*10 + [True] + \
 		[True] + [False]*4 + [True]*2 + [False]*12 + [True] + \
 		[True] + [False]*6 + [True] + [False]*11 + [True] + \
-		[True] + [False]*4 + [True] + [False] + [True] + [False]*11 + [True] + \
+		[True] + [False]*4 + [True] + [False] + [False] + [False]*11 + [True] + \
 		[False] + [False]*4 + [True] + [False] + [True] + [False]*11 + [True] + \
-		[True] + [False]*18 + [True] + \
+		[True] + [False]*5 + [True] + [False]*12 + [True] + \
 		[True] + [False]*4 + [True]*6 + [False]*8 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*4 + [True]*7 + [False]*7 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
-		[True] + [False]*4 + [True]*7 + [False]*7 + [False] + \
+		[True] + [False]*4 + [True]*7 + [False]*7 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True] + [False]*18 + [True] + \
 		[True]*20
 
 	geomap = GeoMap((20, 20), tilemap)
-	#geomap_wide = geomap_get2widemap(geomap)
+	geomap_wide = geomap_get2widemap(geomap)
 
 	# set up attacks
 	jab = Attack(
