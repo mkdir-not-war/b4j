@@ -233,11 +233,14 @@ def get_screen_coord(playerpos, playeroff, worldp):
 	diffy = worldp[1]-playerpos[1]
 	return(playeroff[0]+diffx, playeroff[1]+diffy)
 
+BADDY_HITBOX_SCALE = 0.8
+
 class Entity:
 	def __init__(self, pos, direction=(0,1), enemytype=None):
 		self.p = pos[:]
 		self.dp = [0, 0]
 		self.direction = direction[:]
+		self.centeroffset = tilewidth/2 # assumes basic entity, e.g. Door, is 1-tile big
 
 		self.stuntimer = 0
 
@@ -252,11 +255,25 @@ class Entity:
 		self.poise = 0
 
 		if (enemytype != None):
+			# stats
 			self.hp = enemytype.maxhp
 			self.weight = enemytype.weight
 			self.poise = enemytype.poise
 
+			# build the hitbox as a list of offsets from the top left corner of the sprite
+			self.centeroffset = tilewidth * enemytype.width/2
+			offset = BADDY_HITBOX_SCALE * tilewidth * enemytype.width/2
+			self.hitbox = [
+				(self.centeroffset-offset, self.centeroffset-offset), 
+				(self.centeroffset-offset, self.centeroffset+offset),
+				(self.centeroffset+offset, self.centeroffset+offset),
+				(self.centeroffset+offset, self.centeroffset-offset)]
+
 WEIGHT_FRAME_MULT = 10
+
+def entity_getcenter(entity):
+	result = (entity.p[0]+entity.centeroffset, entity.p[1]+entity.centeroffset)
+	return result
 
 def entity_hurt(entity, hurtbox, megabrain):
 	entity.hp -= 1
@@ -295,10 +312,11 @@ def entity_update_physics(entity):
 	if (entity.enemytype != None and entity.brain != None):
 		movetarget = entity.brain.movetarget
 		if (movetarget != None):
+			center = entity_getcenter(entity)
 			entity.direction = normalize((
-				movetarget[0]-entity.p[0], 
-				movetarget[1]-entity.p[1]))	
-			if distance_less_than(entity.p, movetarget, tilewidth):
+				movetarget[0]-center[0], 
+				movetarget[1]-center[1]))	
+			if distance_less_than(center, movetarget, tilewidth):
 				speed = entity.enemytype.speed
 
 	# if not stunned, delta-position is set to direction
@@ -318,9 +336,11 @@ def entity_update_physics(entity):
 	entity.dp = [0, 0]
 
 class EnemyType:
-	def __init__(self, name, dr, ib, t2f, widthintiles=1, maxhp=1, poise=0, weight=1, speed=0, timebetweenattacks=60):
-		self.name = name
-		self.attacks = []
+	def __init__(
+		self, dr, ib, t2f, 
+		widthintiles=1, maxhp=1, poise=0, weight=1, speed=0, timebetweenattacks=60, attacks=[]):
+
+		self.attacks = attacks
 		self.timebetweenattacks = timebetweenattacks
 		# attack objects, hp and range at which to use them
 		self.detectionradius = dr # read by megabrain
@@ -331,9 +351,18 @@ class EnemyType:
 		self.maxhp = maxhp
 		self.poise = poise # use to determine if stunned or not from attack
 		self.weight = weight # use to determine how long stunned
-		self.patrolnodes = []
 
-et_basiccreature = EnemyType('basic creature', 5, 'idle', 6, maxhp=3, speed=0)
+		self.patrolnodes = [] ########## MIGHT DITCH PATROLS
+
+enemytypes = {}
+enemytypes['basic melee creature'] = EnemyType(
+	5, 'idle', 10, 
+	widthintiles=1, maxhp=3, speed=0,
+	attacks=['jab', 'uppercut'])
+enemytypes['basic ranged creature'] = EnemyType(
+	5, 'idle', 45, 
+	widthintiles=1, maxhp=3, speed=0,
+	attacks=['jab_ranged'])
 
 # megabrain handles coordination between multiple hostile enemy AIs
 class MegaBrain:
@@ -405,6 +434,7 @@ def megabrain_update(megabrain, geomap, hurtboxes, player, screen):
 		# mutliple directions instead of only just one direction?? Need to test for feel.
 		for b in megabrain.brains:
 			if (b.currentbehavior == 'threaten' and b.actionframe <= 0):
+				continue ################################# SKIP ATTACKING DEBUG #############
 				if (len(b.attacksinrange) > 0):
 					b.currentattack = b.attacksinrange[0] # use choice
 					b.currentbehavior = 'attack'
@@ -489,7 +519,7 @@ def brain_attack_update(b, geomap, player, mb, hurtboxes):
 				hurtboxes.append(hurtbox_get(
 					hurtbox, 
 					e.direction, 
-					e.p, 
+					entity_getcenter(e), 
 					atk))
 			elif b.attackstate == 'active':
 				b.attackstate = 'cooldown'
@@ -665,6 +695,20 @@ class Attack:
 		if (hurtframes == 0):
 			self.hurtframes = activeframes
 
+attacktypes = {}
+attacktypes['jab'] = Attack(
+	1, 4, 20, 
+	[(22, 12), (48, 12), (48, -12), (22, -12)],
+	rangeofatk=80)
+attacktypes['uppercut'] = Attack(
+	24, 6, 36,
+	[(22, 12), (48, 12), (48, -12), (22, -12)],
+	rangeofatk=80)
+attacktypes['jab_ranged'] = Attack(
+	1, 4, 20,
+	[(22, 12), (48, 12), (48, -12), (22, -12)],
+	rangeofatk=200, hurtframes=30, speed=8)
+
 class GeoMap:
 	def __init__(self, dimensions, geo):
 		self.width, self.height = dimensions
@@ -692,7 +736,7 @@ def geomap_getadjacent(geolist, width, height, pos, diagonal=False):
 					result[adjpos] = geolist[width * adjpos[1] + adjpos[0]]
 	return result
 
-# NOTE: assumes tile-position of entity is bottom-left corner.
+# NOTE: assumes tile-position of entity is top-left corner.
 def geomap_getwidemap(geomap, minpassagewidth):
 	width, height = geomap.width, geomap.height
 	prevgen = geomap.geo[:]
@@ -707,13 +751,15 @@ def geomap_getwidemap(geomap, minpassagewidth):
 	newgeo = prevgen[:]
 
 	for gen in range(minpassagewidth-1):
-		# grow on the left and bottom side of walls
+		# grow on the left and top side of walls
 		for j in range(1, height-1):
 			for i in range(1, width-1):
 				if (prevgen[width * j + i] == False):
+					# left side
 					if (prevgen[width * j + (i+1)]):
 						newgeo[width * j + i] = True
-					if (prevgen[width * (j-1) + i]):
+					# top side
+					if (prevgen[width * (j+1) + i]):
 						for k in range(minpassagewidth):
 							newgeo[width * j + (i-k)] = True
 		prevgen = newgeo[:]
@@ -765,7 +811,7 @@ def geomap_getpathingmap(geomap):
 	gens = 12
 
 	pathcost = 1
-	nonwallcost = 10
+	nonwallcost = 3#10
 	wallcost = width*height
 
 	prevgen = []
@@ -842,18 +888,21 @@ def geomap_getpathingmap(geomap):
 		prevgen = result[:]		
 
 	# DEBUG ###########
-	
+	'''
 	def func(x):
 		return '# ' if x else '. '
 	def func2(x):
 		return '. ' if x==1 else 'x ' if x<100 else '# '
 	grid_print(geomap.geo, (width, height), func)
 	grid_print(result, (width, height), func2)
-	
+	'''
 	###################
 
 	return result
 
+def geomap_astar(geomap, pos, target):
+	# only use cardinal directions (carddirs)
+	pass
 
 # position is center of object, dimensions is (width, height)
 def geomap_gettilegeo_frompos(geomap, position, dimensions):
@@ -900,33 +949,91 @@ def get_tile_pos(worldpos):
 	result = (tx, ty)
 	return result
 
-def get_world_pos(tilepos):
+def get_world_pos(tilepos, offset=(0, 0)):
 	tx, ty = tilepos
-	result = (tx*tilewidth, ty*tilewidth)
+	ox, oy = offset
+	result = ((tx+ox)*tilewidth, (ty+oy)*tilewidth)
 	return result
 
+class ReadEntity:
+	def __init__(self, tile, etype):
+		self.tile = tile
+		self.etype = etype
+
+def spawnentities(readentities, megabrain):
+	entities = []
+
+	for re in readentities:
+		enemytype = None
+		
+		if (re.etype in enemytypes):
+			enemytype = enemytypes[re.etype]
+
+		worldpos = get_world_pos(re.tile)
+		
+		newent = Entity(worldpos, enemytype=enemytype)
+		newent.brain = Brain(newent)
+		for atkname in attacktypes:
+			newent.brain.attacks.append(attacktypes[atkname])
+		entities.append(newent)
+
+	for e in entities:
+		megabrain_addbrain(megabrain, e.brain)
+
+	return entities
+
 def tilemap_load(filepath):
-	result = []
+	geometry = []
 	width = 0
 	height = 0
+	spawn = None
+	readentities = []
+
+	readstate = 'layout'
+	entitiesdict = {}
 
 	f = open(filepath, 'r')
 	for line in f:
-		spline = line.strip('\n')
-		width = len(spline)
-		for char in spline:
-			if (char == '#'):
-				result.append(True)
-			elif (char == '.'):
-				result.append(False)
-		height += 1
+		sline = line.strip('\n')
+
+		# check for tags
+		if (sline == 'end-layout'):
+			readstate = 'entities'
+			continue
+		elif (sline == 'end-entities'):
+			break
+
+		# read map layout
+		if (readstate == 'layout'):
+			width = len(sline)
+			for index in range(len(sline)):
+				char = sline[index]
+				# geometry
+				if (char == '#'):
+					geometry.append(True)
+				else:
+					geometry.append(False)
+				# spawn location
+				if (char == 's'):
+					spawn = (index, height)
+				# entities
+				if (char != 's' and char != '#' and char != '.'):
+					entitiesdict[char] = (index, height)
+			height += 1
+		# read entities on map
+		elif (readstate == 'entities'):
+			# put entity object into the dictionary
+			spline = sline.split(':')
+			assert(spline[0] in entitiesdict)
+			readentities.append(ReadEntity(entitiesdict[spline[0]], spline[1]))
+
 	f.close()
 
 	def func(x):
 		return '# ' if x else '. '
-	#grid_print(result, (width, height), func)
+	#grid_print(geometry, (width, height), func)
 
-	return (width, height), result
+	return (width, height), geometry, spawn, readentities
 
 def main():
 	pygame.init()
@@ -948,64 +1055,35 @@ def main():
 	clock = pygame.time.Clock()
 	FPS = 30
 
+	# input stuff
 	pygame.joystick.init()
 
-	geometry = []
+	# start loading the map and the stuff in it
 	entities = []
 	hurtboxes = []
-
-	dimensions, tilemap = tilemap_load('./smallmap.txt')
+	dimensions, tilemap, spawnloc, readentities = tilemap_load('./bigmap.txt')
 
 	geomap = GeoMap(dimensions, tilemap)
 	geomap_2wide = geomap_getwidemap(geomap, 2)
-	geomap_3wide = geomap_getwidemap(geomap, 3)
-
-	# set up attacks
-	jab = Attack(
-		1, 4, 20, 
-		[(22, 12), (48, 12), (48, -12), (22, -12)],
-		rangeofatk=80)
-	uppercut = Attack(
-		24, 6, 36,
-		[(22, 12), (48, 12), (48, -12), (22, -12)],
-		rangeofatk=80)
-
-	jab_ranged = Attack(
-		1, 4, 20,
-		[(22, 12), (48, 12), (48, -12), (22, -12)],
-		rangeofatk=200, hurtframes=30, speed=8)
+	#geomap_3wide = geomap_getwidemap(geomap, 3)
 
 	# start up mega brain
 	megabrain = MegaBrain()
 
-	# throw in a couple baddies
-	baddy1 = Entity(get_world_pos((10, 6)), enemytype=et_basiccreature)
-	baddy1.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
-	entities.append(baddy1)
-	baddy1.brain = Brain(baddy1)
-	baddy1.brain.attacks.append(jab)
-	baddy1.brain.attacks.append(uppercut)
-	megabrain_addbrain(megabrain, baddy1.brain)
-
-	baddy2 = Entity(get_world_pos((15, 9)), enemytype=et_basiccreature)
-	baddy2.hitbox = [(-20, -20), (-20, 20), (20, 20), (20, -20)]
-	entities.append(baddy2)
-	baddy2.brain = Brain(baddy2)
-	baddy2.brain.attacks.append(jab_ranged)	
-	megabrain_addbrain(megabrain, baddy2.brain)
+	# spawn baddies, doors, etc
+	entities = spawnentities(readentities, megabrain)
 
 	# player stuff
 	playeroffset = midscreen
 	player = Player()
-	player.p = [100, 100]
+	player.p = get_world_pos(spawnloc, (0.5, 0.5))
 	speed = 3.7
 	player.dir = (0, 1)
-	# offset from player pos, as a factor of size
 	player.movebox = [(18, 0), (0, -18), (-18, 0), (0, 18)] 
 
-	player.jab = jab
-	player.uppercut = uppercut
-	player.jab_upgraded = jab_ranged
+	player.jab = attacktypes['jab']
+	player.uppercut = attacktypes['uppercut']
+	player.jab_upgraded = attacktypes['jab_ranged']
 
 
 	prev_input = []
