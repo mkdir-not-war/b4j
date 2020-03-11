@@ -361,15 +361,15 @@ enemytypes['small melee creature'] = EnemyType(
 	widthintiles=1, maxhp=3, speed=0,
 	attacks=['jab', 'uppercut'])
 enemytypes['small ranged creature'] = EnemyType(
-	5, 'idle', 20, 
+	5, 'lookout', 20, 
 	widthintiles=1, maxhp=3, speed=0,
 	attacks=['jab_ranged'])
 enemytypes['medium melee creature'] = EnemyType(
-	5, 'idle', 20, 
+	5, 'lookout', 20, 
 	widthintiles=2, maxhp=3, speed=0,
 	attacks=['jab', 'uppercut'])
 enemytypes['large melee creature'] = EnemyType(
-	5, 'idle', 20, 
+	5, 'lookout', 20, 
 	widthintiles=3, maxhp=3, speed=0,
 	attacks=['jab', 'uppercut'])
 
@@ -474,7 +474,7 @@ class Brain:
 		self.actionframe = 0
 
 		self.movetarget = None # set by megabrain
-		self.currentbehavior = 'idle'
+		self.currentbehavior = 'lookout'
 		self.timesincedetection = 0
 		self.time2turn = 0
 
@@ -484,6 +484,7 @@ class Brain:
 IDLE_TURN_MIN_TIME = 25
 IDLE_TURN_MAX_TIME = 80
 
+# use idle for bosses or enemies who need to watch an entrance, otherwise default to lookout
 def brain_idle_update(b, geomap, player_detected):
 	if (player_detected):
 		b.currentbehavior = 'threaten'
