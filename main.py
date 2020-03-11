@@ -236,11 +236,12 @@ def get_screen_coord(playerpos, playeroff, worldp):
 BADDY_HITBOX_SCALE = 0.8
 
 class Entity:
-	def __init__(self, pos, direction=(0,1), enemytype=None):
+	def __init__(self, pos, width=1, direction=(0,1), enemytype=None):
 		self.p = pos[:]
 		self.dp = [0, 0]
 		self.direction = direction[:]
-		self.centeroffset = tilewidth/2 # assumes basic entity, e.g. Door, is 1-tile big
+		self.width = width
+		self.centeroffset = width * tilewidth/2
 
 		self.stuntimer = 0
 
@@ -261,8 +262,9 @@ class Entity:
 			self.poise = enemytype.poise
 
 			# build the hitbox as a list of offsets from the top left corner of the sprite
-			self.centeroffset = tilewidth * enemytype.width/2
-			offset = BADDY_HITBOX_SCALE * tilewidth * enemytype.width/2
+			self.width = enemytype.width
+			self.centeroffset = tilewidth * self.width/2
+			offset = BADDY_HITBOX_SCALE * tilewidth * self.width/2
 			self.hitbox = [
 				(self.centeroffset-offset, self.centeroffset-offset), 
 				(self.centeroffset-offset, self.centeroffset+offset),
@@ -355,14 +357,22 @@ class EnemyType:
 		self.patrolnodes = [] ########## MIGHT DITCH PATROLS
 
 enemytypes = {}
-enemytypes['basic melee creature'] = EnemyType(
-	5, 'idle', 10, 
+enemytypes['small melee creature'] = EnemyType(
+	5, 'idle', 20, 
 	widthintiles=1, maxhp=3, speed=0,
 	attacks=['jab', 'uppercut'])
-enemytypes['basic ranged creature'] = EnemyType(
-	5, 'idle', 45, 
+enemytypes['small ranged creature'] = EnemyType(
+	5, 'idle', 20, 
 	widthintiles=1, maxhp=3, speed=0,
 	attacks=['jab_ranged'])
+enemytypes['medium melee creature'] = EnemyType(
+	5, 'idle', 20, 
+	widthintiles=2, maxhp=3, speed=0,
+	attacks=['jab', 'uppercut'])
+enemytypes['large melee creature'] = EnemyType(
+	5, 'idle', 20, 
+	widthintiles=3, maxhp=3, speed=0,
+	attacks=['jab', 'uppercut'])
 
 # megabrain handles coordination between multiple hostile enemy AIs
 class MegaBrain:
@@ -397,7 +407,15 @@ def megabrain_update(megabrain, geomap, hurtboxes, player, screen):
 		# check if player is in detection range
 		player_detected = False
 		player_tile = get_tile_pos(player.p)
-		e_tiles = [get_tile_pos((x+e.p[0], y+e.p[1])) for (x, y) in e.hitbox]
+
+		e_tiles = []
+		topleftpos = v2_add(e.hitbox[0], e.p)
+		for i in range(e.width+1):
+			for j in range(e.width+1):
+				offset = (i*tilewidth*BADDY_HITBOX_SCALE, j*tilewidth*BADDY_HITBOX_SCALE)
+				tilepos = get_tile_pos(v2_add(topleftpos, offset))
+				e_tiles.append(tilepos)
+
 		if (player_tile in e_tiles):
 			player_detected = True
 		else:
@@ -496,9 +514,15 @@ def brain_threaten_update(b, geomap, player, mb, player_detected):
 	# build in-range attacks list/bool array??
 	b.attacksinrange.clear()
 	if (player_detected):
+		b.timesincedetection = 0
 		for atk in b.attacks:
 			if (distance_less_than(player.p, b.entity.p, atk.range)):
 				b.attacksinrange.append(atk)
+	else:
+		b.timesincedetection += 1
+		if (b.timesincedetection > b.entity.enemytype.time2forget):
+			b.currentbehavior = 'idle'
+			b.actionframe = 0
 
 def brain_attack_update(b, geomap, player, mb, hurtboxes):
 	# assume entity has enemytype
