@@ -45,5 +45,5 @@
 ############...##############################
 #############################################
 end-layout
-1:large melee creature
+1:small melee creature
 end-entities

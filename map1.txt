@@ -14,5 +14,5 @@
 #...............#...#
 #####################
 end-layout
-1:basic melee creature
+1:medium melee creature
 end-entities

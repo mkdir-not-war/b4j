@@ -1,5 +1,6 @@
 import pygame
 from math import sqrt
+from random import choice, random
 
 def dot(v1, v2):
 	result = v1[0]*v2[0] + v1[1]*v2[1]
@@ -354,11 +355,9 @@ class EnemyType:
 		self.poise = poise # use to determine if stunned or not from attack
 		self.weight = weight # use to determine how long stunned
 
-		self.patrolnodes = [] ########## MIGHT DITCH PATROLS
-
 enemytypes = {}
 enemytypes['small melee creature'] = EnemyType(
-	5, 'idle', 20, 
+	5, 'idle', 2, 
 	widthintiles=1, maxhp=3, speed=0,
 	attacks=['jab', 'uppercut'])
 enemytypes['small ranged creature'] = EnemyType(
@@ -439,8 +438,8 @@ def megabrain_update(megabrain, geomap, hurtboxes, player, screen):
 
 		if b.currentbehavior == 'idle':
 			brain_idle_update(b, geomap, player_detected)
-		elif b.currentbehavior == 'patrol':
-			brain_patrol_update(b, geomap, player_detected)
+		elif b.currentbehavior == 'lookout':
+			brain_lookout_update(b, geomap, player_detected)
 		elif b.currentbehavior == 'threaten':
 			brain_threaten_update(b, geomap, player, megabrain, player_detected)
 		elif b.currentbehavior == 'attack':
@@ -477,30 +476,32 @@ class Brain:
 		self.movetarget = None # set by megabrain
 		self.currentbehavior = 'idle'
 		self.timesincedetection = 0
-
-		self.patrolnodeindex = 0 # are we even going to use patrols?
+		self.time2turn = 0
 
 		if (entity.enemytype != None):
 			self.currentbehavior = entity.enemytype.initialbehavior
 
+IDLE_TURN_MIN_TIME = 25
+IDLE_TURN_MAX_TIME = 80
+
 def brain_idle_update(b, geomap, player_detected):
 	if (player_detected):
-		print('threaten!')
 		b.currentbehavior = 'threaten'
 		b.actionframe = b.entity.enemytype.timebetweenattacks
 
-def brain_patrol_update(b, geomap, player_detected):
+def brain_lookout_update(b, geomap, player_detected):
+	if (b.actionframe == 0):
+		b.time2turn = int(
+			random() * (IDLE_TURN_MAX_TIME - IDLE_TURN_MIN_TIME) + IDLE_TURN_MIN_TIME)
+	b.actionframe += 1
+
 	if (player_detected):
-		print('threaten!')
 		b.currentbehavior = 'threaten'
 		b.actionframe = b.entity.enemytype.timebetweenattacks
-	# assumes nodes are always reachable directly from previous nodes, no collision
-	elif (get_tile_pos(b.entity.p) == get_tile_pos(b.movetarget)):
-		b.patrolnodeindex -= 1
-		if (b.patrolnodeindex < 0):
-			b.patrolnodeindex = len(b.enemytype.patrolnodes)
-		b.movetarget = b.enemytype.patrolnodes[-b.patrolnodeindex] # use negative index in python
-		# in C#, keep track of legnth of array and just iterate forwards instead of backwards
+	elif (b.actionframe >= b.time2turn):
+		b.actionframe = 0
+		newdir = choice(carddirs)
+		b.entity.direction = newdir
 
 def brain_threaten_update(b, geomap, player, mb, player_detected):
 	if mb.timer == 1:
@@ -521,7 +522,8 @@ def brain_threaten_update(b, geomap, player, mb, player_detected):
 	else:
 		b.timesincedetection += 1
 		if (b.timesincedetection > b.entity.enemytype.time2forget):
-			b.currentbehavior = 'idle'
+			b.currentbehavior = 'lookout'
+			b.movetarget = None
 			b.actionframe = 0
 
 def brain_attack_update(b, geomap, player, mb, hurtboxes):
