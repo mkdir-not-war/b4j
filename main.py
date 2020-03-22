@@ -792,7 +792,7 @@ def geomap_getwidemap(geomap, minpassagewidth):
 		prevgen = newgeo[:]
 
 	# DEBUG ###########
-	'''
+	
 	def func(x):
 		return '# ' if x else '. '
 	print('~~ geomap with minimum passage width: %d ' % minpassagewidth + '~'*20)
@@ -801,7 +801,7 @@ def geomap_getwidemap(geomap, minpassagewidth):
 	grid_print(newgeo, (width, height), func)
 	print('~'*60)
 	print()
-	'''
+	
 	###################
 
 	result = GeoMap((width, height), newgeo)
@@ -915,14 +915,14 @@ def geomap_getpathingmap(geomap):
 		prevgen = result[:]		
 
 	# DEBUG ###########
-	'''
+	
 	def func(x):
 		return '# ' if x else '. '
 	def func2(x):
 		return '. ' if x==1 else 'x ' if x<100 else '# '
 	grid_print(geomap.geo, (width, height), func)
 	grid_print(result, (width, height), func2)
-	'''
+	
 	###################
 
 	return result
