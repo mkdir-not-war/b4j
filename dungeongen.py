@@ -1,7 +1,7 @@
 from random import choice, random, randint, sample
 
-MAX_ROOMS = 10
-MIN_ROOMS = 2
+MAX_ROOMS = 15
+MIN_ROOMS = 3
 MAX_MULT = 2
 
 def weighted_choice(options, weights):
@@ -84,6 +84,8 @@ class DungeonGraph:
 
 	def set_lock_and_end(self):
 		room = choice(list(self.nodes.values()))
+		while (room.tag == 'key'):
+			room = choice(list(self.nodes.values()))
 
 		lock = DungeonNode('lock')
 		lock.tag = 'lock'
