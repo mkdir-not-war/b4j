@@ -1,8 +1,8 @@
 from random import choice, random, randint, sample
 
-MAX_ROOMS = 30
+MAX_ROOMS = 16
 MIN_ROOMS = 4
-MAX_MULT = 3
+MAX_MULT = 2
 
 def weighted_choice(options, weights):
 	summed = sum(weights)
@@ -51,25 +51,17 @@ class DungeonGraph:
 			dest.previous.append(node.name)
 		self.nodes[node.name] = node
 
-	def node_insert(self, node, srcs=[], dests=[]):
-		for src in srcs:
-			for dest in dests:
-				if (dest.name in src.next):
-					src.next.remove(dest.name)
-					dest.previous.remove(src.name)
-		self.node_append(node, srcs, dests)
-
 	def node_collapse(self, node):
 		assert(node.type == 'room')
 		node.type = 'intersection'
 
-	# doesn't accoutn for loops quite yet
-	def set_end(self):
-		start = self.nodes['room A']
+	def set_bigkey(self):
+		start = self.nodes['start']
 		depthtracker = {}
-		depthtracker['room A'] = 0
+		depthtracker['start'] = 0
 		rooms = [start]
-		nextrooms = start.next[:]
+		nextrooms = start.next[:] + start.previous[:]
+		nextrooms.remove('lock')
 		depth = 0
 
 		while(len(nextrooms) > 0):
@@ -81,26 +73,33 @@ class DungeonGraph:
 				for nextroom in room.next:
 					if nextroom not in depthtracker:
 						nextrooms.append(nextroom)
-		end = choice(rooms)
-		self.nodes[end.name].tag = 'end'
-		print('%s set to end' % end.name)
+				for nextroom in room.previous:
+					if nextroom not in depthtracker:
+						nextrooms.append(nextroom)
+		keyroom = choice(rooms)
+		self.nodes[keyroom.name].tag = 'bigkey'
+		print('%s set to key' % keyroom.name)
 
 	def clear(self):
 		self.nodes = {}
 
 	def generate(self, weights, collapse_percent):
-		start = DungeonNode('room A')
-		roomb = DungeonNode('room B')
+		start = DungeonNode('start')
+		lock = DungeonNode('lock')
+		lock.type = 'intersection'
+		lock.tag = 'biglock'
+		end = DungeonNode('end')
 
 		self.node_append(start)
-		self.node_append(roomb, srcs=[start])
+		self.node_append(lock, srcs=[start])
+		self.node_append(end, srcs=[lock])
 
 		# build rooms out
-		options = ['skip', 'loop', 'append', 'insert', 'connect']
+		options = ['skip', 'loop', 'append', 'connect']
 		weights = weights
 		visited = []
-		rooms = ['room A']
-		numrooms = 2
+		rooms = ['start']
+		numrooms = 0
 		while (len(rooms) > 0 and numrooms < MAX_ROOMS*(1.0+collapse_percent)):
 			room = self.nodes[rooms.pop(0)]
 			visited.append(room.name)
@@ -122,14 +121,15 @@ class DungeonGraph:
 
 			# add on new rooms for the other options
 			if opt == 'loop':
-				# create a chain of rooms, length mult, that leads back to the current room
+				# create a chain of rooms, length mult+1, that leads back to the current room
 				print('loop %s %d' % (room.name, mult))
 				prevroom = room
-				for i in range(mult):
-					roomname = 'room %s' % alphaname(numrooms)
+				looplen = mult+1
+				for i in range(looplen):
+					roomname = 'node %s' % alphaname(numrooms)
 					node = DungeonNode(roomname)
 					dests = []
-					if (i == mult-1):
+					if (i == looplen-1):
 						dests = [room]
 					self.node_append(node, srcs=[prevroom], dests=dests)
 					prevroom = node
@@ -139,52 +139,52 @@ class DungeonGraph:
 				# add a number (mult) of additional rooms branching off of the current room
 				print('append %s %d' % (room.name, mult))
 				for i in range(mult):
-					roomname = 'room %s' % alphaname(numrooms)
+					roomname = 'node %s' % alphaname(numrooms)
 					node = DungeonNode(roomname)
 					self.node_append(node, srcs=[room])
-					numrooms += 1
-					rooms.append(roomname)
-			elif opt == 'insert':
-				# insert a room between the current room and a number (mult) of subsequent rooms
-				print('insert %s %d' % (room.name, mult))
-				for i in range(mult):
-					roomname = 'room %s' % alphaname(numrooms)
-					node = DungeonNode(roomname)
-					dests = [self.nodes[name] for name in room.next]
-					self.node_insert(node, srcs=[room], dests=dests)
 					numrooms += 1
 					rooms.append(roomname)
 			elif opt == 'connect':
 				# connect this room back to a number (mult) of visited rooms
 				print('connect %s %d' % (room.name, mult))
-				samplelist = list(self.nodes.values())[:]
+				samplelist = list(self.nodes)[:]
+				samplelist.remove(room.name)
+				samplelist.remove("lock")
+				samplelist.remove("end")
 				for src in room.previous:
-					samplelist.remove(self.nodes[src])
-				prevrooms = sample(samplelist, min(mult, lenv))
-				for p in prevrooms:
+					samplelist.remove(src)
+				for dest in room.next:
+					samplelist.remove(dest)
+				prevrooms = sample(samplelist, min(mult, len(samplelist)))
+				for pname in prevrooms:
+					p = self.nodes[pname]
 					p.next.insert(0, room.name)
-					room.previous.append(p.name)
+					room.previous.append(pname)
 
-		self.set_end()
+		self.set_bigkey()
 
 	def print(self):
 		print()
 		print('\tDungeon:')
 		index = 1
 		visited = []
-		nodetags = ['room A']
-		while (len(nodetags) > 0):
-			nodetag = nodetags.pop(0)
-			node = self.nodes[nodetag]
-			printline = '\t%d. %s' % (index, nodetag)
+		nodenames = ['start']
+		while (len(nodenames) > 0):
+			nodename = nodenames.pop(0)
+			node = self.nodes[nodename]
+			if (node.tag != ''):
+				nodename += ' (%s)' % node.tag
+			printline = '\t%d. %s' % (index, nodename)
 			for nextnode in node.next:
-				printline += ' -> %s\n\t\t' % nextnode
-				if (nextnode not in nodetags and nextnode not in visited):
-					nodetags.append(nextnode)
+				nextnodename = nextnode
+				if (self.nodes[nextnode].tag != ''):
+					nextnodename += ' (%s)' % self.nodes[nextnode].tag
+				printline += ' -> %s\n\t\t' % nextnodename
+				if (nextnode not in nodenames and nextnode not in visited):
+					nodenames.append(nextnode)
 			print(printline)
 			index += 1
-			visited.append(nodetag)
-		print()
+			visited.append(nodename)
 
 def main():
 	print('Starting dungeon gen. Enter \'q\' to quit.')
@@ -192,8 +192,9 @@ def main():
 	while(1):
 		rin = input('>> ')
 
-		# skip, loop, append, insert, connect
-		weights = [40, 23, 12, 17, 8]
+		# skip, loop, append, connect
+		#weights = [80, 23, 12, 20]
+		weights = [80, 20, 10, 20]
 
 		collapse_percent = 0.2
 
