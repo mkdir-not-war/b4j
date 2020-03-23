@@ -1,7 +1,7 @@
 from random import choice, random, randint, sample
 
-MAX_ROOMS = 16
-MIN_ROOMS = 4
+MAX_ROOMS = 10
+MIN_ROOMS = 3
 MAX_MULT = 2
 
 def weighted_choice(options, weights):
@@ -30,69 +30,72 @@ class DungeonNode:
 	def __init__(self, name=''):
 		self.name = name
 		self.tag = ''
-		self.type = 'room'
-		self.previous = []
-		self.next = []
-
-	def numlinks(self):
-		result = len(self.previous) + len(self.next)
-		return result
+		self.links = []
 
 class DungeonGraph:
 	def __init__(self):
 		self.nodes = {}
+		self.layout = {}
+		self.maxdepth = 0
 
 	def node_append(self, node, srcs=[], dests=[]):
 		for src in srcs:
-			node.previous.append(src.name)
-			src.next.insert(0, node.name)
+			node.links.insert(0, src.name)
+			src.links.insert(0, node.name)
 		for dest in dests:
-			node.next.insert(0, dest.name)
-			dest.previous.append(node.name)
+			node.links.insert(0, dest.name)
+			dest.links.insert(0, node.name)
 		self.nodes[node.name] = node
 
-	def node_collapse(self, node):
-		assert(node.type == 'room')
-		node.type = 'intersection'
+	'''
+	After the graph has been generated, organize into lists by depth.
+	Furthermore, the order of each depth's list should be such that
+	it minimizes distance between connected rooms. E.g., if A -> B,
+	then:
 
-	def set_bigkey(self):
+	0: [A D C]
+	1: [B Y Z]
+
+	is preferable to
+
+	0: [C D A]
+	1: [B Y Z]
+
+	'''
+	def build_layout(self):
 		start = self.nodes['start']
-		depthtracker = {}
-		depthtracker['start'] = 0
+		visited = ['start']
+		self.layout[0] = [start]
 		rooms = [start]
-		nextrooms = start.next[:] + start.previous[:]
-		nextrooms.remove('lock')
-		depth = 0
+		nextrooms = start.links
+		depth = 1
 
+		# build out preliminary, unorganized layout
 		while(len(nextrooms) > 0):
-			depth += 1
+			self.layout[depth] = []
 			rooms = [self.nodes[r] for r in nextrooms]
+			visited.extend(nextrooms)
 			nextrooms = []
 			for room in rooms:
-				depthtracker[room.name] = depth
-				for nextroom in room.next:
-					if nextroom not in depthtracker:
+				self.layout[depth].append(room)
+				for nextroom in room.links:
+					if nextroom not in visited and nextroom not in nextrooms:
 						nextrooms.append(nextroom)
-				for nextroom in room.previous:
-					if nextroom not in depthtracker:
-						nextrooms.append(nextroom)
-		keyroom = choice(rooms)
-		self.nodes[keyroom.name].tag = 'bigkey'
+			depth += 1
+		self.maxdepth = depth-1
+		print(depth)
+
+	def set_key(self):
+		keyroom = choice(self.layout[self.maxdepth])
+		self.nodes[keyroom.name].tag = 'key'
 		print('%s set to key' % keyroom.name)
 
 	def clear(self):
 		self.nodes = {}
 
-	def generate(self, weights, collapse_percent):
+	def generate(self, weights):
 		start = DungeonNode('start')
-		lock = DungeonNode('lock')
-		lock.type = 'intersection'
-		lock.tag = 'biglock'
-		end = DungeonNode('end')
-
 		self.node_append(start)
-		self.node_append(lock, srcs=[start])
-		self.node_append(end, srcs=[lock])
 
 		# build rooms out
 		options = ['skip', 'loop', 'append', 'connect']
@@ -100,7 +103,7 @@ class DungeonGraph:
 		visited = []
 		rooms = ['start']
 		numrooms = 0
-		while (len(rooms) > 0 and numrooms < MAX_ROOMS*(1.0+collapse_percent)):
+		while (len(rooms) > 0 and numrooms < (MAX_ROOMS - MAX_MULT)):
 			room = self.nodes[rooms.pop(0)]
 			visited.append(room.name)
 
@@ -149,42 +152,34 @@ class DungeonGraph:
 				print('connect %s %d' % (room.name, mult))
 				samplelist = list(self.nodes)[:]
 				samplelist.remove(room.name)
-				samplelist.remove("lock")
-				samplelist.remove("end")
-				for src in room.previous:
-					samplelist.remove(src)
-				for dest in room.next:
-					samplelist.remove(dest)
+				for link in room.links:
+					samplelist.remove(link)
 				prevrooms = sample(samplelist, min(mult, len(samplelist)))
 				for pname in prevrooms:
 					p = self.nodes[pname]
-					p.next.insert(0, room.name)
-					room.previous.append(pname)
+					room.links.insert(0, pname)
+					p.links.append(room.name)
 
-		self.set_bigkey()
+		# organize rooms by depth
+		self.build_layout()
+
+		# put key in deepest room of this level
+		self.set_key()
+
+		# put locked door somewhere in the dungeon, followed by "end"
+		lock = DungeonNode('lock')
+		lock.tag = 'lock'
+		end = DungeonNode('end')
+
+		self.node_append(lock, srcs=[choice(list(self.nodes.values()))])
+		self.node_append(end, srcs=[lock])
 
 	def print(self):
 		print()
 		print('\tDungeon:')
-		index = 1
-		visited = []
-		nodenames = ['start']
-		while (len(nodenames) > 0):
-			nodename = nodenames.pop(0)
-			node = self.nodes[nodename]
-			if (node.tag != ''):
-				nodename += ' (%s)' % node.tag
-			printline = '\t%d. %s' % (index, nodename)
-			for nextnode in node.next:
-				nextnodename = nextnode
-				if (self.nodes[nextnode].tag != ''):
-					nextnodename += ' (%s)' % self.nodes[nextnode].tag
-				printline += ' -> %s\n\t\t' % nextnodename
-				if (nextnode not in nodenames and nextnode not in visited):
-					nodenames.append(nextnode)
-			print(printline)
-			index += 1
-			visited.append(nodename)
+
+		for depth in range(self.maxdepth+1):
+			print('\t%d. %s' % (depth, [node.name for node in self.layout[depth]]))
 
 def main():
 	print('Starting dungeon gen. Enter \'q\' to quit.')
@@ -193,10 +188,7 @@ def main():
 		rin = input('>> ')
 
 		# skip, loop, append, connect
-		#weights = [80, 23, 12, 20]
 		weights = [80, 20, 10, 20]
-
-		collapse_percent = 0.2
 
 		if (rin == 'q'):
 			return
@@ -209,7 +201,7 @@ def main():
 			except:
 				print('Malformed weights -- using defaults.')
 
-		dungeon.generate(weights, collapse_percent)
+		dungeon.generate(weights)
 		dungeon.print()
 		dungeon.clear()
 
