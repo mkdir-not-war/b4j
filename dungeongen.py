@@ -1,7 +1,7 @@
 from random import choice, random, randint, sample
 
 MAX_ROOMS = 10
-MIN_ROOMS = 3
+MIN_ROOMS = 2
 MAX_MULT = 2
 
 def weighted_choice(options, weights):
@@ -80,7 +80,7 @@ class DungeonGraph:
 	def set_key(self):
 		keyroom = choice(self.layout[self.maxdepth])
 		self.nodes[keyroom.name].tag = 'key'
-		print('%s set to key' % keyroom.name)
+		#print('%s set to key' % keyroom.name)
 
 	def set_lock_and_end(self):
 		room = choice(list(self.nodes.values()))
@@ -119,7 +119,7 @@ class DungeonGraph:
 		visited = []
 		rooms = ['start']
 		numrooms = 0
-		while (len(rooms) > 0 and numrooms < max(MIN_ROOMS, (MAX_ROOMS - MAX_MULT))):
+		while (len(rooms) > 0 and numrooms < (MAX_ROOMS - MAX_MULT)):
 			room = self.nodes[rooms.pop(0)]
 			visited.append(room.name)
 
@@ -127,7 +127,7 @@ class DungeonGraph:
 			opt = weighted_choice(options, weights)
 
 			# pick again if "connect" and not enough visited rooms
-			lenv = len(visited)
+			lenv = len(visited) - 1
 			while ((opt == 'connect' and lenv < MAX_MULT) or (opt == 'skip' and lenv < MIN_ROOMS)):
 				opt = weighted_choice(options, weights)
 
@@ -141,7 +141,7 @@ class DungeonGraph:
 			# add on new rooms for the other options
 			if opt == 'loop':
 				# create a chain of rooms, length mult+1, that leads back to the current room
-				print('loop %s %d' % (room.name, mult))
+				#print('loop %s %d' % (room.name, mult))
 				prevroom = room
 				looplen = mult+1
 				for i in range(looplen):
@@ -156,7 +156,7 @@ class DungeonGraph:
 					rooms.append(roomname)
 			elif opt == 'append':
 				# add a number (mult) of additional rooms branching off of the current room
-				print('append %s %d' % (room.name, mult))
+				#print('append %s %d' % (room.name, mult))
 				for i in range(mult):
 					roomname = '%s' % alphaname(numrooms)
 					node = DungeonNode(roomname)
@@ -165,7 +165,7 @@ class DungeonGraph:
 					rooms.append(roomname)
 			elif opt == 'connect':
 				# connect this room back to a number (mult) of visited rooms
-				print('connect %s %d' % (room.name, mult))
+				#print('connect %s %d' % (room.name, mult))
 				samplelist = list(self.nodes)[:]
 				samplelist.remove(room.name)
 				for link in room.links:
@@ -189,6 +189,8 @@ class DungeonGraph:
 		print()
 		print('\tDungeon:')
 
+		linelength = 17
+
 		for depth in range(self.maxdepth, -1, -1):
 			nodes = self.layout[depth]
 			topline = '\t%d. ' % depth
@@ -198,7 +200,7 @@ class DungeonGraph:
 					line = '%s (%s)' % (node.name, node.tag)
 				else:
 					line = '%s' % node.name
-				line += ' ' * (max(0 , 20 - len(line)))
+				line += ' ' * (max(0 , linelength - len(line)))
 				topline += '%s' % line
 			print()
 			print(topline)
@@ -214,10 +216,10 @@ class DungeonGraph:
 							line = '%s (%s)' % (link.name, link.tag)
 						else:
 							line = '%s' % link.name
-						line += ' ' * (max(0 , 15 - len(line)))
+						line += ' ' * (max(0 , linelength - 5 - len(line)))
 						printline += '|--> %s' % line
 					else:
-						printline += ' ' * 20
+						printline += ' ' * linelength
 				print(printline)
 
 def main():
