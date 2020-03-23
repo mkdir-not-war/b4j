@@ -1,7 +1,7 @@
 from random import choice, random, randint, sample
 
-MAX_ROOMS = 5
-MIN_ROOMS = 2
+MAX_ROOMS = 10
+MIN_ROOMS = 3
 MAX_MULT = 2
 
 def weighted_choice(options, weights):
@@ -35,6 +35,9 @@ class DungeonNode:
 
 class DungeonGraph:
 	def __init__(self):
+		self.clear()
+
+	def clear(self):
 		self.nodes = {}
 		self.layout = {}
 		self.maxdepth = 0
@@ -105,11 +108,6 @@ class DungeonGraph:
 			self.layout[end.depth] = [end]
 			self.maxdepth += 2
 
-	def clear(self):
-		self.nodes = {}
-		self.layout = {}
-		self.maxdepth = 0
-
 	def generate(self, weights):
 		start = DungeonNode('start')
 		start.depth = 0
@@ -121,7 +119,7 @@ class DungeonGraph:
 		visited = []
 		rooms = ['start']
 		numrooms = 0
-		while (len(rooms) > 0 and numrooms < (MAX_ROOMS - MAX_MULT)):
+		while (len(rooms) > 0 and numrooms < max(MIN_ROOMS, (MAX_ROOMS - MAX_MULT))):
 			room = self.nodes[rooms.pop(0)]
 			visited.append(room.name)
 
@@ -218,6 +216,8 @@ class DungeonGraph:
 							line = '%s' % link.name
 						line += ' ' * (max(0 , 15 - len(line)))
 						printline += '|--> %s' % line
+					else:
+						printline += ' ' * 20
 				print(printline)
 
 def main():
@@ -227,8 +227,7 @@ def main():
 		rin = input('>> ')
 
 		# skip, loop, append, connect
-		#weights = [80, 20, 10, 20]
-		weights = [9, 1, 0, 0]
+		weights = [80, 20, 10, 20]
 
 		if (rin == 'q'):
 			return
