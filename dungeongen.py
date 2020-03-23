@@ -1,7 +1,7 @@
 from random import choice, random, randint, sample
 
-MAX_ROOMS = 10
-MIN_ROOMS = 3
+MAX_ROOMS = 5
+MIN_ROOMS = 2
 MAX_MULT = 2
 
 def weighted_choice(options, weights):
@@ -31,6 +31,7 @@ class DungeonNode:
 		self.name = name
 		self.tag = ''
 		self.links = []
+		self.depth = -1
 
 class DungeonGraph:
 	def __init__(self):
@@ -49,18 +50,6 @@ class DungeonGraph:
 
 	'''
 	After the graph has been generated, organize into lists by depth.
-	Furthermore, the order of each depth's list should be such that
-	it minimizes distance between connected rooms. E.g., if A -> B,
-	then:
-
-	0: [A D C]
-	1: [B Y Z]
-
-	is preferable to
-
-	0: [C D A]
-	1: [B Y Z]
-
 	'''
 	def build_layout(self):
 		start = self.nodes['start']
@@ -78,23 +67,52 @@ class DungeonGraph:
 			nextrooms = []
 			for room in rooms:
 				self.layout[depth].append(room)
+				room.depth = depth
 				for nextroom in room.links:
 					if nextroom not in visited and nextroom not in nextrooms:
 						nextrooms.append(nextroom)
 			depth += 1
 		self.maxdepth = depth-1
-		print(depth)
 
 	def set_key(self):
 		keyroom = choice(self.layout[self.maxdepth])
 		self.nodes[keyroom.name].tag = 'key'
 		print('%s set to key' % keyroom.name)
 
+	def set_lock_and_end(self):
+		room = choice(list(self.nodes.values()))
+
+		lock = DungeonNode('lock')
+		lock.tag = 'lock'
+		lock.depth = room.depth + 1
+		
+		end = DungeonNode('end')
+		end.tag = 'end'
+		end.depth = room.depth + 2
+
+		self.node_append(lock, srcs=[room])
+		self.node_append(end, srcs=[lock])
+
+		if end.depth in self.layout:
+			self.layout[lock.depth].append(lock)
+			self.layout[end.depth].append(end)
+		elif lock.depth in self.layout:
+			self.layout[lock.depth].append(lock)
+			self.layout[end.depth] = [end]
+			self.maxdepth += 1
+		else:
+			self.layout[lock.depth] = [lock]
+			self.layout[end.depth] = [end]
+			self.maxdepth += 2
+
 	def clear(self):
 		self.nodes = {}
+		self.layout = {}
+		self.maxdepth = 0
 
 	def generate(self, weights):
 		start = DungeonNode('start')
+		start.depth = 0
 		self.node_append(start)
 
 		# build rooms out
@@ -129,7 +147,7 @@ class DungeonGraph:
 				prevroom = room
 				looplen = mult+1
 				for i in range(looplen):
-					roomname = 'node %s' % alphaname(numrooms)
+					roomname = '%s' % alphaname(numrooms)
 					node = DungeonNode(roomname)
 					dests = []
 					if (i == looplen-1):
@@ -142,7 +160,7 @@ class DungeonGraph:
 				# add a number (mult) of additional rooms branching off of the current room
 				print('append %s %d' % (room.name, mult))
 				for i in range(mult):
-					roomname = 'node %s' % alphaname(numrooms)
+					roomname = '%s' % alphaname(numrooms)
 					node = DungeonNode(roomname)
 					self.node_append(node, srcs=[room])
 					numrooms += 1
@@ -167,19 +185,40 @@ class DungeonGraph:
 		self.set_key()
 
 		# put locked door somewhere in the dungeon, followed by "end"
-		lock = DungeonNode('lock')
-		lock.tag = 'lock'
-		end = DungeonNode('end')
-
-		self.node_append(lock, srcs=[choice(list(self.nodes.values()))])
-		self.node_append(end, srcs=[lock])
+		self.set_lock_and_end()
 
 	def print(self):
 		print()
 		print('\tDungeon:')
 
-		for depth in range(self.maxdepth+1):
-			print('\t%d. %s' % (depth, [node.name for node in self.layout[depth]]))
+		for depth in range(self.maxdepth, -1, -1):
+			nodes = self.layout[depth]
+			topline = '\t%d. ' % depth
+			for node in nodes:
+				line = ''
+				if (node.tag == 'key'):
+					line = '%s (%s)' % (node.name, node.tag)
+				else:
+					line = '%s' % node.name
+				line += ' ' * (max(0 , 20 - len(line)))
+				topline += '%s' % line
+			print()
+			print(topline)
+
+			maxlinks = max([len(node.links) for node in nodes])
+			for i in range(maxlinks):
+				printline = '\t   '
+				for node in nodes:
+					if len(node.links) > i:
+						link = self.nodes[node.links[i]]
+						line = ''
+						if (link.tag == 'key'):
+							line = '%s (%s)' % (link.name, link.tag)
+						else:
+							line = '%s' % link.name
+						line += ' ' * (max(0 , 15 - len(line)))
+						printline += '|--> %s' % line
+				print(printline)
 
 def main():
 	print('Starting dungeon gen. Enter \'q\' to quit.')
@@ -188,7 +227,8 @@ def main():
 		rin = input('>> ')
 
 		# skip, loop, append, connect
-		weights = [80, 20, 10, 20]
+		#weights = [80, 20, 10, 20]
+		weights = [9, 1, 0, 0]
 
 		if (rin == 'q'):
 			return
