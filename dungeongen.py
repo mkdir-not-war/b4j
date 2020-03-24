@@ -1,8 +1,8 @@
 from random import choice, random, randint, sample
 
-MAX_SECTIONS = 5
+MAX_SECTIONS = 8
 MIN_SECTIONS = 1
-MAX_ROOMS = 6
+MAX_ROOMS = 10
 MIN_ROOMS = 3
 
 def weighted_choice(options, weights):
@@ -248,7 +248,7 @@ def main():
 		rin = input('>> ')
 
 		# skip, loop, append, connect
-		weights = [80, 20, 20, 10]
+		weights = [80, 20, 25, 5]
 
 		if (rin == 'q'):
 			return
