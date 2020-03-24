@@ -1,7 +1,9 @@
 from random import choice, random, randint, sample
 
-MAX_ROOMS = 15
-MIN_ROOMS = 3
+MAX_SECTIONS = 5
+MIN_SECTIONS = 1
+MAX_ROOMS = 5
+MIN_ROOMS = 2
 MAX_MULT = 2
 
 def weighted_choice(options, weights):
@@ -30,6 +32,7 @@ class DungeonNode:
 	def __init__(self, name=''):
 		self.name = name
 		self.tag = ''
+		self.locked = False
 		self.links = []
 		self.depth = -1
 
@@ -54,64 +57,83 @@ class DungeonGraph:
 	'''
 	After the graph has been generated, organize into lists by depth.
 	'''
-	def build_layout(self):
-		start = self.nodes['start']
-		visited = ['start']
-		self.layout[0] = [start]
+	def build_layout(self, start):
+		# set current depth
+		if (start.depth == 0):
+			self.layout[0] = [start]
 		rooms = [start]
-		nextrooms = start.links
-		depth = 1
+		nextrooms = [self.nodes[link] for link in start.links]
+		depth = start.depth + 1
 
-		# build out preliminary, unorganized layout
+		# build layout
 		while(len(nextrooms) > 0):
-			self.layout[depth] = []
-			rooms = [self.nodes[r] for r in nextrooms]
-			visited.extend(nextrooms)
+			# if current depth is further than before, set up the layout list
+			if (depth not in self.layout):
+				self.layout[depth] = []
+			
+			# swap room buffer
+			rooms = nextrooms[:]
 			nextrooms = []
+			# if room is new (depth=-1), put it in the layout
 			for room in rooms:
-				self.layout[depth].append(room)
-				room.depth = depth
-				for nextroom in room.links:
-					if nextroom not in visited and nextroom not in nextrooms:
-						nextrooms.append(nextroom)
-			depth += 1
-		self.maxdepth = depth-1
+				if (room.depth < 0):
+					room.depth = depth
+					self.layout[depth].append(room)
+					for nextroom in room.links:
+						node = self.nodes[nextroom]
+						if node.depth < 0 and node not in nextrooms:
+							nextrooms.append(node)
+			if (len(nextrooms) > 0):
+				depth += 1
+
+		i = 0
+		while (i in self.layout):
+			nodes = self.layout[i]
+			if (len(nodes) > 0):
+				i += 1
+			else:
+				del self.layout[i]
+				break
+		self.maxdepth = i-1
+
 
 	def set_key(self):
-		keyroom = choice(self.layout[self.maxdepth])
+		depth = self.maxdepth
+		keyroom = self.layout[depth][0]
+		while (keyroom.tag == 'key'):
+			keyput = False
+			for room in self.layout[depth]:
+				if room.tag != 'key':
+					keyput = True
+					keyroom = room
+			if keyput:
+				break
+			else:
+				depth -=1 
+				assert(depth >= 0)
 		self.nodes[keyroom.name].tag = 'key'
 		#print('%s set to key' % keyroom.name)
 
-	def set_lock_and_end(self):
+	def set_lock_and_end(self, section):
 		room = choice(list(self.nodes.values()))
 		while (room.tag == 'key'):
 			room = choice(list(self.nodes.values()))
-
-		lock = DungeonNode('lock')
-		lock.tag = 'lock'
-		lock.depth = room.depth + 1
 		
-		end = DungeonNode('end')
-		end.tag = 'end'
-		end.depth = room.depth + 2
+		end = DungeonNode('end-%d' % section)
+		end.locked = True
+		end.depth = room.depth + 1
 
-		self.node_append(lock, srcs=[room])
-		self.node_append(end, srcs=[lock])
+		self.node_append(end, srcs=[room])
 
 		if end.depth in self.layout:
-			self.layout[lock.depth].append(lock)
 			self.layout[end.depth].append(end)
-		elif lock.depth in self.layout:
-			self.layout[lock.depth].append(lock)
+		else:
 			self.layout[end.depth] = [end]
 			self.maxdepth += 1
-		else:
-			self.layout[lock.depth] = [lock]
-			self.layout[end.depth] = [end]
-			self.maxdepth += 2
 
 	def generate(self, weights):
 		start = DungeonNode('start')
+		start.tag = 'start'
 		start.depth = 0
 		self.node_append(start)
 
@@ -119,89 +141,102 @@ class DungeonGraph:
 		options = ['skip', 'loop', 'append', 'connect']
 		weights = weights
 		visited = []
-		rooms = ['start']
+		sections = randint(MIN_SECTIONS, MAX_SECTIONS)
+
+		totalrooms = 0
 		numrooms = 0
-		while (len(rooms) > 0 and numrooms < (MAX_ROOMS - MAX_MULT)):
-			room = self.nodes[rooms.pop(0)]
-			visited.append(room.name)
+		for section in range(1, sections+1):
+			rooms = [start.name]
 
-			# choose options
-			opt = weighted_choice(options, weights)
+			totalrooms += numrooms
+			numrooms = 0
+			while (len(rooms) > 0 and numrooms < (MAX_ROOMS - MAX_MULT)):
+				room = self.nodes[rooms.pop(0)]
+				if (room.name not in visited):
+					visited.append(room.name)
 
-			# pick again if "connect" and not enough visited rooms
-			lenv = len(visited) - 1
-			while ((opt == 'connect' and lenv < MAX_MULT) or (opt == 'skip' and lenv < MIN_ROOMS)):
+				# choose options
 				opt = weighted_choice(options, weights)
 
-			if opt == 'skip':
-				continue
+				# pick again if "connect" and not enough visited rooms
+				lenv = len(visited) - 1
+				while ((opt == 'connect' and lenv < MAX_MULT) or (opt == 'skip' and lenv < MIN_ROOMS)):
+					opt = weighted_choice(options, weights)
+
+				if opt == 'skip':
+					continue
 
 
-			# choose a multiplier for the option
-			mult = randint(1, MAX_MULT)
+				# choose a multiplier for the option
+				mult = randint(1, MAX_MULT)
 
-			# add on new rooms for the other options
-			if opt == 'loop':
-				# create a chain of rooms, length mult+1, that leads back to the current room
-				#print('loop %s %d' % (room.name, mult))
-				prevroom = room
-				looplen = mult+1
-				for i in range(looplen):
-					roomname = '%s' % alphaname(numrooms)
-					node = DungeonNode(roomname)
-					dests = []
-					if (i == looplen-1):
-						dests = [room]
-					self.node_append(node, srcs=[prevroom], dests=dests)
-					prevroom = node
-					numrooms += 1
-					rooms.append(roomname)
-			elif opt == 'append':
-				# add a number (mult) of additional rooms branching off of the current room
-				#print('append %s %d' % (room.name, mult))
-				for i in range(mult):
-					roomname = '%s' % alphaname(numrooms)
-					node = DungeonNode(roomname)
-					self.node_append(node, srcs=[room])
-					numrooms += 1
-					rooms.append(roomname)
-			elif opt == 'connect':
-				# connect this room back to a number (mult) of visited rooms
-				#print('connect %s %d' % (room.name, mult))
-				samplelist = list(self.nodes)[:]
-				samplelist.remove(room.name)
-				for link in room.links:
-					samplelist.remove(link)
-				prevrooms = sample(samplelist, min(mult, len(samplelist)))
-				for pname in prevrooms:
-					p = self.nodes[pname]
-					room.links.insert(0, pname)
-					p.links.append(room.name)
+				# add on new rooms for the other options
+				if opt == 'loop':
+					# create a chain of rooms, length mult+1, that leads back to the current room
+					#print('loop %s %d' % (room.name, mult))
+					prevroom = room
+					looplen = mult+1
+					for i in range(looplen):
+						roomname = '%s' % alphaname(numrooms+totalrooms)
+						node = DungeonNode(roomname)
+						dests = []
+						if (i == looplen-1):
+							dests = [room]
+						self.node_append(node, srcs=[prevroom], dests=dests)
+						prevroom = node
+						numrooms += 1
+						rooms.append(roomname)
+				elif opt == 'append':
+					# add a number (mult) of additional rooms branching off of the current room
+					#print('append %s %d' % (room.name, mult))
+					for i in range(mult):
+						roomname = '%s' % alphaname(numrooms+totalrooms)
+						node = DungeonNode(roomname)
+						self.node_append(node, srcs=[room])
+						numrooms += 1
+						rooms.append(roomname)
+				elif opt == 'connect':
+					# connect this room back to a number (mult) of visited rooms
+					#print('connect %s %d' % (room.name, mult))
+					samplelist = list(self.nodes)[:]
+					samplelist.remove(room.name)
+					for link in room.links:
+						samplelist.remove(link)
+					prevrooms = sample(samplelist, min(mult, len(samplelist)))
+					for pname in prevrooms:
+						p = self.nodes[pname]
+						room.links.insert(0, pname)
+						p.links.append(room.name)
 
-		# organize rooms by depth
-		self.build_layout()
+			# organize rooms by depth
+			self.build_layout(start)
 
-		# put key in deepest room of this level
-		self.set_key()
+			# put key in deepest room of this level
+			self.set_key()
 
-		# put locked door somewhere in the dungeon, followed by "end"
-		self.set_lock_and_end()
+			# put locked door somewhere in the dungeon, followed by "end"
+			self.set_lock_and_end(section)
+
+			# pick a new starting position for the next section
+			start = choice(list(self.nodes.values()))
 
 	def print(self):
 		print()
 		print('\tDungeon:')
 
-		linelength = 17
+		linelength = 19
 
 		for depth in range(self.maxdepth, -1, -1):
 			nodes = self.layout[depth]
 			topline = '\t%d. ' % depth
 			for node in nodes:
 				line = ''
-				if (node.tag == 'key'):
+				if (node.tag in ['key']):
 					line = '%s (%s)' % (node.name, node.tag)
 				else:
 					line = '%s' % node.name
+				if (node.locked):
+					line += ' (lock)'
 				line += ' ' * (max(0 , linelength - len(line)))
 				topline += '%s' % line
 			print()
@@ -213,11 +248,7 @@ class DungeonGraph:
 				for node in nodes:
 					if len(node.links) > i:
 						link = self.nodes[node.links[i]]
-						line = ''
-						if (link.tag == 'key'):
-							line = '%s (%s)' % (link.name, link.tag)
-						else:
-							line = '%s' % link.name
+						line = '%s' % link.name
 						line += ' ' * (max(0 , linelength - 5 - len(line)))
 						printline += '|--> %s' % line
 					else:
