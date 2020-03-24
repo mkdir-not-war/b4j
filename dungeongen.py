@@ -2,9 +2,8 @@ from random import choice, random, randint, sample
 
 MAX_SECTIONS = 5
 MIN_SECTIONS = 1
-MAX_ROOMS = 5
-MIN_ROOMS = 2
-MAX_MULT = 2
+MAX_ROOMS = 6
+MIN_ROOMS = 3
 
 def weighted_choice(options, weights):
 	summed = sum(weights)
@@ -97,29 +96,20 @@ class DungeonGraph:
 		self.maxdepth = i-1
 
 
-	def set_key(self):
-		depth = self.maxdepth
-		keyroom = self.layout[depth][0]
-		while (keyroom.tag == 'key'):
-			keyput = False
-			for room in self.layout[depth]:
-				if room.tag != 'key':
-					keyput = True
-					keyroom = room
-			if keyput:
-				break
-			else:
-				depth -=1 
-				assert(depth >= 0)
+	def set_key(self, section):
+		keyroom = self.layout[self.maxdepth][0]
+		if (section > 1):
+			while (keyroom.tag == 'key'):
+				keyroom = choice(list(self.nodes.values()))
 		self.nodes[keyroom.name].tag = 'key'
 		#print('%s set to key' % keyroom.name)
 
-	def set_lock_and_end(self, section):
+	def set_locked_nodes(self, section):
 		room = choice(list(self.nodes.values()))
 		while (room.tag == 'key'):
 			room = choice(list(self.nodes.values()))
 		
-		end = DungeonNode('end-%d' % section)
+		end = DungeonNode('%s' % alphaname(len(self.nodes.keys())-1))
 		end.locked = True
 		end.depth = room.depth + 1
 
@@ -150,7 +140,7 @@ class DungeonGraph:
 
 			totalrooms += numrooms
 			numrooms = 0
-			while (len(rooms) > 0 and numrooms < (MAX_ROOMS - MAX_MULT)):
+			while (len(rooms) > 0 and numrooms < MAX_ROOMS):
 				room = self.nodes[rooms.pop(0)]
 				if (room.name not in visited):
 					visited.append(room.name)
@@ -160,27 +150,23 @@ class DungeonGraph:
 
 				# pick again if "connect" and not enough visited rooms
 				lenv = len(visited) - 1
-				while ((opt == 'connect' and lenv < MAX_MULT) or (opt == 'skip' and lenv < MIN_ROOMS)):
+				while ((opt == 'connect'  or opt == 'skip') and lenv < MIN_ROOMS):
 					opt = weighted_choice(options, weights)
 
 				if opt == 'skip':
 					continue
 
 
-				# choose a multiplier for the option
-				mult = randint(1, MAX_MULT)
-
 				# add on new rooms for the other options
 				if opt == 'loop':
 					# create a chain of rooms, length mult+1, that leads back to the current room
 					#print('loop %s %d' % (room.name, mult))
 					prevroom = room
-					looplen = mult+1
-					for i in range(looplen):
+					for i in range(2):
 						roomname = '%s' % alphaname(numrooms+totalrooms)
 						node = DungeonNode(roomname)
 						dests = []
-						if (i == looplen-1):
+						if (i == 1):
 							dests = [room]
 						self.node_append(node, srcs=[prevroom], dests=dests)
 						prevroom = node
@@ -189,12 +175,11 @@ class DungeonGraph:
 				elif opt == 'append':
 					# add a number (mult) of additional rooms branching off of the current room
 					#print('append %s %d' % (room.name, mult))
-					for i in range(mult):
-						roomname = '%s' % alphaname(numrooms+totalrooms)
-						node = DungeonNode(roomname)
-						self.node_append(node, srcs=[room])
-						numrooms += 1
-						rooms.append(roomname)
+					roomname = '%s' % alphaname(numrooms+totalrooms)
+					node = DungeonNode(roomname)
+					self.node_append(node, srcs=[room])
+					numrooms += 1
+					rooms.append(roomname)
 				elif opt == 'connect':
 					# connect this room back to a number (mult) of visited rooms
 					#print('connect %s %d' % (room.name, mult))
@@ -202,7 +187,7 @@ class DungeonGraph:
 					samplelist.remove(room.name)
 					for link in room.links:
 						samplelist.remove(link)
-					prevrooms = sample(samplelist, min(mult, len(samplelist)))
+					prevrooms = sample(samplelist, min(1, len(samplelist)))
 					for pname in prevrooms:
 						p = self.nodes[pname]
 						room.links.insert(0, pname)
@@ -212,10 +197,11 @@ class DungeonGraph:
 			self.build_layout(start)
 
 			# put key in deepest room of this level
-			self.set_key()
+			self.set_key(section)
 
 			# put locked door somewhere in the dungeon, followed by "end"
-			self.set_lock_and_end(section)
+			self.set_locked_nodes(section)
+			numrooms += 1
 
 			# pick a new starting position for the next section
 			start = choice(list(self.nodes.values()))
@@ -262,7 +248,7 @@ def main():
 		rin = input('>> ')
 
 		# skip, loop, append, connect
-		weights = [80, 20, 10, 20]
+		weights = [80, 20, 20, 10]
 
 		if (rin == 'q'):
 			return
